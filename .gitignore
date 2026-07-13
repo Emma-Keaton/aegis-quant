@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+build/
+dist/
+coverage/
+
+# Environment
+.env*
+!.env.example
+
+# IDE
+.DS_Store
+*.log
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Backend
+backend/venv/
+backend/.venv/
+
+# Database
+*.sqlite
+*.db
+
+# Repos (external git repos for reference)
+repos/
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini

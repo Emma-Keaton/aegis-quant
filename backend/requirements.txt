@@ -1,0 +1,41 @@
+# Core
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+
+# Database
+sqlalchemy
+asyncpg
+alembic
+psycopg2-binary
+
+# Redis
+redis
+
+# Telegram
+python-telegram-bot
+
+# Exchanges
+ccxt
+
+# Scheduling
+apscheduler
+
+# Task Queue
+celery
+
+# Crypto
+cryptography
+
+# HTTP
+httpx
+
+# PyTorch CPU (for Kronos client)
+torch --index-url https://download.pytorch.org/whl/cpu
+transformers
+
+# Utilities
+orjson
+python-multipart

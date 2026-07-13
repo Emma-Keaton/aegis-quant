@@ -1,0 +1,1 @@
+"""Aegis Quant Backend - FastAPI Application"""
