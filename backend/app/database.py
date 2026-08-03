@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import event
-from app.config import get_settings
+from app.config import get_settings, get_database_url
 
 
 class Base(DeclarativeBase):
@@ -10,14 +10,25 @@ class Base(DeclarativeBase):
 
 settings = get_settings()
 
-# Create async engine
-engine = create_async_engine(
-    settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_pre_ping=True,
-    echo=settings.DEBUG,
-)
+# Get database URL with proper Supabase handling
+db_url = get_database_url()
+
+if "sqlite" in db_url:
+    # SQLite for development
+    db_args = {}
+else:
+    # PostgreSQL with Supabase settings
+    db_args = {
+        "pool_size": settings.DATABASE_POOL_SIZE,
+        "max_overflow": settings.DATABASE_MAX_OVERFLOW,
+        "pool_pre_ping": True,
+        "echo": settings.DEBUG,
+        "connect_args": {
+            "sslmode": "require",  # Required by Supabase
+        },
+    }
+
+engine = create_async_engine(db_url, **db_args)
 
 # Async session factory
 AsyncSessionLocal = async_sessionmaker(
@@ -38,9 +49,14 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db() -> None:
-    """Initialize database - create tables"""
+    """Initialize database - create tables. Skipped in dev mode."""
+    if "sqlite" in db_url:
+        print("[DB] Skipping DB init — SQLite in development mode")
+        return
+    
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        print("[DB] Tables created/verified successfully")
 
 
 async def close_db() -> None:
@@ -48,12 +64,13 @@ async def close_db() -> None:
     await engine.dispose()
 
 
-# Enable TimescaleDB extension (run once in migration)
 async def enable_timescaledb() -> None:
-    """Enable TimescaleDB extension and create hypertables"""
+    """Enable TimescaleDB extension (run once after migration)."""
+    if "sqlite" in db_url:
+        return
+    
     async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb;"))
+        await conn.execute(__import__('sqlalchemy').text(
+            "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+        ))
         await conn.commit()
-
-
-from sqlalchemy import text

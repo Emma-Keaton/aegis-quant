@@ -19,6 +19,8 @@ python-telegram-bot
 
 # Exchanges
 ccxt
+solana
+google-generativeai
 
 # Scheduling
 apscheduler
@@ -35,7 +37,15 @@ httpx
 # PyTorch CPU (for Kronos client)
 torch --index-url https://download.pytorch.org/whl/cpu
 transformers
+bitsandbytes
+pandas
+numpy
 
 # Utilities
 orjson
-python-multipart
+python-multipart>=0.0.7
+
+# Solana
+solana
+solders
+base58

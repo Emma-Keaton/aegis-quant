@@ -5,33 +5,47 @@ import Wallet from "./components/Wallet";
 import Strategy from "./components/Strategy";
 import Intel from "./components/Intel";
 import Logs from "./components/Logs";
-import { Home, Wallet as WalletIcon, Sliders, Zap, History, Shield, RefreshCw } from "lucide-react";
+import { setSessionToken, getSessionToken, clearSession, apiJson } from "./api/client";
+import { Home, Wallet as WalletIcon, Sliders, Zap, History, RefreshCw } from "lucide-react";
+import AdminPanel from "./components/AdminPanel";
+
+const DEFAULT_USER_STATE: UserState = {
+  walletConnected: false,
+  walletAddress: "",
+  network: "TON",
+  balance: 0,
+  portfolioValue: 0,
+  dailyProfitLoss: 0,
+  pnlPercentage: 0,
+  agentActive: false,
+  agentTarget: "Trend Scrape + Kronos",
+  riskLimit: 10,
+  tradeMode: "PAPER",
+  currency: "USD",
+  nairaRate: 1520,
+  positions: [],
+  connectedCeFi: {
+    bybit: { connected: false, encryptedKeys: null },
+    okx: { connected: false, encryptedKeys: null }
+  }
+};
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<"home" | "wallet" | "strategy" | "intel" | "logs">("home");
+  const [currentTab, setCurrentTab] = useState<"home" | "wallet" | "strategy" | "intel" | "logs" | "admin">("home");
   const [loading, setLoading] = useState<boolean>(true);
   const [stateError, setStateError] = useState<string | null>(null);
 
-  // App core state
-  const [userState, setUserState] = useState<UserState>({
-    walletConnected: true,
-    walletAddress: "UQAzf88d7H6kR39_TqW7Lp93mJ21_z_Xy89Yd",
-    network: "TON",
-    balance: 124.50,
-    portfolioValue: 4812.90,
-    dailyProfitLoss: 520.10,
-    pnlPercentage: 14.2,
-    agentActive: true,
-    agentTarget: "Trend Scrape + Kronos",
-    riskLimit: 10,
-    tradeMode: "PAPER",
-    currency: "USD",
-    nairaRate: 1520,
-    positions: [],
-    connectedCeFi: {
-      bybit: { connected: true, encryptedKeys: "aes-256:simulated" },
-      okx: { connected: false, encryptedKeys: null }
-    }
+  // App core state — initialized empty, populated from API
+  const [userState, setUserState] = useState<UserState>({ ...DEFAULT_USER_STATE });
+  const [riskSettings, setRiskSettings] = useState<RiskSettings>({
+    maxAllocation: 15,
+    maxConcurrentTrades: 3,
+    riskLevel: "AGGRESSIVE",
+    stopLoss: 3.0,
+    takeProfit: 6.5,
+    trailingStop: 1.0,
+    whitelist: ["SOL", "TON", "ETH", "BTC", "PEPE", "BONK", "WIF"],
+    baseTradeUsd: 10.0
   });
 
   // Backtest result overlay state
@@ -45,112 +59,118 @@ export default function App() {
   // Network Offline connection loss simulation state
   const [networkOffline, setNetworkOffline] = useState<boolean>(false);
 
-  const [riskSettings, setRiskSettings] = useState<RiskSettings>({
-    maxAllocation: 15,
-    maxConcurrentTrades: 3,
-    riskLevel: "AGGRESSIVE",
-    stopLoss: 3.0,
-    takeProfit: 6.5,
-    trailingStop: 1.0,
-    whitelist: ["SOL", "TON", "ETH", "BTC", "PEPE", "BONK", "WIF"]
-  });
+  // ── Auth / Session Init ────────────────────────────────────────
+
+  const initSession = async (): Promise<boolean> => {
+    // If we already have a valid token, try to refresh it
+    const existingToken = getSessionToken();
+    if (existingToken) {
+      try {
+        const res = await fetch("/api/auth/refresh", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${existingToken}` }
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.status === "success") {
+            setSessionToken(json.session_token);
+            return true;
+          }
+        }
+      } catch {
+        // Token stale, will re-init below
+      }
+      // Token is invalid, clear it
+      clearSession();
+    }
+
+    // No token or stale — send Telegram initData for /auth/init
+    const initUrl = new URL(window.location.href);
+    const initData = initUrl.searchParams.get("tg_initData");
+    
+    if (!initData) {
+      console.warn("[Auth] No tg_initData found — running in demo mode");
+      return false;
+    }
+
+    try {
+      const res = await fetch("/api/auth/init", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": initData,
+        },
+        body: JSON.stringify({})
+      });
+      
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === "success" && json.session_token) {
+          setSessionToken(json.session_token);
+          return true;
+        }
+      }
+    } catch (e) {
+      console.error("[Auth] init failed:", e);
+    }
+    
+    return false;
+  };
+
+  // ── Data Fetch ────────────────────────────────────────────────
 
   const fetchState = async () => {
     try {
       const [stateRes, riskRes] = await Promise.all([
-        fetch("/api/state"),
-        fetch("/api/risk-profile")
+        apiJson<any>("/api/state"),
+        apiJson<any>("/api/risk-profile")
       ]);
-      if (stateRes.ok && riskRes.ok) {
-        const stateJson = await stateRes.json();
-        const riskJson = await riskRes.json();
-        if (stateJson.status === "success") {
-          const uState = stateJson.data || stateJson.userState;
-          if (uState) {
-            setUserState(uState);
-          }
-        }
-        if (riskJson.status === "success" && riskJson.data) {
-          setRiskSettings(riskJson.data);
-        }
+      
+      if (stateRes.data || stateRes.userState) {
+        const uState = stateRes.data || stateRes.userState;
+        setUserState(prev => ({ ...prev, ...uState }));
+      }
+      if (riskRes.data) {
+        setRiskSettings(riskRes.data);
       }
     } catch (err) {
-      console.error("Could not coordinate full state with background server", err);
+      console.error("[State] Could not load user state:", err);
+      setStateError("Failed to load state");
     } finally {
       setLoading(false);
     }
   };
 
-  // Real-time Internet & Backend connectivity monitoring (watches real navigator and polls backend API)
+  // ── Connectivity Monitoring ───────────────────────────────────
+
   useEffect(() => {
     const checkConnectivity = async () => {
-      // 1. Check window.navigator.onLine first
       if (!window.navigator.onLine) {
         setNetworkOffline(true);
         return;
       }
-
-      // 2. Ping the backend health endpoint
       try {
         const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), 2500); // 2.5 seconds timeout
-        const res = await fetch("/api/health", { 
-          signal: controller.signal,
-          headers: { 'Cache-Control': 'no-cache' }
-        });
+        const id = setTimeout(() => controller.abort(), 2500);
+        const res = await fetch("/health", { signal: controller.signal, cache: "no-store" });
         clearTimeout(id);
-        if (res.ok) {
-          setNetworkOffline(false);
-        } else {
-          setNetworkOffline(true);
-        }
-      } catch (err) {
+        setNetworkOffline(!res.ok);
+      } catch {
         setNetworkOffline(true);
       }
     };
 
-    // Run immediately on mount
     checkConnectivity();
-
-    // Event listeners for browser online/offline events
-    const handleOnline = () => {
-      checkConnectivity();
-    };
-    const handleOffline = () => {
-      setNetworkOffline(true);
-    };
-
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-
-    // Periodic polling check every 5 seconds to detect backend/internet drops
+    window.addEventListener("online", () => checkConnectivity());
+    window.addEventListener("offline", () => setNetworkOffline(true));
     const interval = setInterval(checkConnectivity, 5000);
 
     return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", () => checkConnectivity());
+      window.removeEventListener("offline", () => setNetworkOffline(true));
       clearInterval(interval);
     };
   }, []);
-
-  const handleRestoreCheck = async () => {
-    if (!window.navigator.onLine) {
-      alert("Browser reports you are still offline. Please verify your internet connection.");
-      return;
-    }
-    try {
-      const res = await fetch("/api/health", { headers: { 'Cache-Control': 'no-cache' } });
-      if (res.ok) {
-        setNetworkOffline(false);
-        alert("✔ Connection successfully re-established!");
-        fetchState();
-      } else {
-        alert("Backend is still unreachable. Reconnecting...");
-      }
-    } catch (err) {
-      alert("Backend is still unreachable. Please verify server status.");
-    }
-  };
 
   useEffect(() => {
     if (!networkOffline) {
@@ -158,214 +178,156 @@ export default function App() {
     }
   }, [networkOffline]);
 
-  // Handler to toggle automated trading agent
-  const handleToggleAgent = async (active: boolean) => {
-    // Optimistic update
-    setUserState(prev => ({ ...prev, agentActive: active }));
-    try {
-      const res = await fetch("/api/toggle-agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active })
-      });
-      if (res.ok) {
+  // ── On Mount: init session + fetch data ────────────────────────
+
+  useEffect(() => {
+    let mounted = true;
+    initSession().then(authenticated => {
+      if (mounted) {
+        setLoading(true); // reset loading for real fetch
         fetchState();
       }
+    }).catch(() => {
+      if (mounted) setLoading(false);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  // ── Handlers ──────────────────────────────────────────────────
+
+  const handleToggleAgent = async (active: boolean) => {
+    setUserState(prev => ({ ...prev, agentActive: active }));
+    try {
+      await apiJson("/api/toggle-agent", { method: "POST", body: JSON.stringify({ active }) });
+      fetchState();
     } catch (err) {
       console.error("Agent toggle failed", err);
+      setUserState(prev => ({ ...prev, agentActive: !active })); // revert
     }
   };
 
-  // Handler to update strategy settings
   const handleUpdateRiskSettings = async (updates: Partial<RiskSettings>) => {
-    const updated = { ...riskSettings, ...updates };
-    // Optimistic update
-    setRiskSettings(updated);
+    setRiskSettings(prev => ({ ...prev, ...updates }));
     try {
-      const res = await fetch("/api/risk-profile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates)
-      });
-      if (res.ok) {
-        fetchState();
-      }
+      await apiJson("/api/risk-profile", { method: "POST", body: JSON.stringify(updates) });
     } catch (err) {
       console.error("Strategy update failed", err);
     }
   };
 
-  // Handler to toggle trade mode (paper/live)
   const handleToggleTradeMode = async (mode: "PAPER" | "LIVE") => {
     setUserState(prev => ({ ...prev, tradeMode: mode }));
     try {
-      const res = await fetch("/api/toggle-mode", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode })
-      });
-      if (res.ok) {
-        fetchState();
-      }
+      await apiJson("/api/toggle-mode", { method: "POST", body: JSON.stringify({ mode }) });
     } catch (err) {
       console.error("Mode toggle failed", err);
     }
   };
 
-  // Handler to toggle currency
   const handleToggleCurrency = async (currency: "USD" | "NGN") => {
     setUserState(prev => ({ ...prev, currency }));
     try {
-      const res = await fetch("/api/toggle-currency", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currency })
+      const json = await apiJson<any>("/api/toggle-currency", {
+        method: "POST", body: JSON.stringify({ currency })
       });
-      if (res.ok) {
-        fetchState();
-      }
+      setUserState(prev => ({ ...prev, nairaRate: json.nairaRate || prev.nairaRate }));
     } catch (err) {
       console.error("Currency toggle failed", err);
     }
   };
 
-  // Handler to update paper trading balance
   const handleUpdatePaperBalance = async (newBalance: number) => {
     setUserState(prev => ({ ...prev, balance: newBalance }));
     try {
-      const res = await fetch("/api/update-paper-balance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ balance: newBalance })
-      });
-      if (res.ok) {
-        fetchState();
-      }
+      await apiJson("/api/update-paper-balance", { method: "POST", body: JSON.stringify({ balance: newBalance }) });
     } catch (err) {
       console.error("Failed to update paper balance", err);
     }
   };
 
-  // Handler to reset settings to default
   const handleResetSettings = async () => {
     try {
-      const res = await fetch("/api/reset-settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.status === "success" && json.data) {
-          setRiskSettings(json.data);
-          alert("✔ Strategy and risk settings restored to system defaults.");
-        }
+      const json = await apiJson<any>("/api/reset-settings", { method: "POST" });
+      if (json.status === "success" && json.data) {
+        setRiskSettings(json.data);
       }
     } catch (err) {
       console.error("Reset settings failed", err);
     }
   };
 
-  // Handler to close all trades under panic trigger
   const handlePanic = async () => {
     setUserState(prev => ({ ...prev, positions: [], agentActive: false }));
     try {
-      const res = await fetch("/api/panic", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      });
-      if (res.ok) {
-        fetchState();
-        alert("🚨 PANIC CLOSE TRIGGERED: All active trade vectors terminated. Systems in secure standby.");
-      }
+      await apiJson("/api/panic", { method: "POST" });
+      fetchState();
     } catch (err) {
       console.error("Panic trigger failed", err);
     }
   };
 
-  // Handler to link Web3 fallback address
   const handleConnectWallet = async (network: string, address: string) => {
+    setUserState(prev => ({
+      ...prev, walletConnected: true, walletAddress: address, network
+    }));
     try {
-      const res = await fetch("/api/wallet-connect", {
+      await apiJson("/api/wallet-connect", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ network, address })
+        body: JSON.stringify({ network, address }),
       });
-      if (res.ok) {
-        fetchState();
-      }
     } catch (err) {
       console.error("Manual wallet connect failed", err);
     }
   };
 
-  // Handler to save manual API keys
   const handleLinkExchangeManual = async (exchange: string, apiKey: string, apiSecret: string) => {
     try {
-      const res = await fetch("/api/exchange-manual", {
+      await apiJson("/api/exchange-manual", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ exchange, apiKey, apiSecret })
+        body: JSON.stringify({ exchange, apiKey, apiSecret }),
       });
-      if (res.ok) {
-        fetchState();
-        alert(`✔ ${exchange.toUpperCase()} API keys saved successfully with active AES-256 database protection.`);
-      }
+      fetchState();
     } catch (err) {
       console.error("Manual keys save failed", err);
     }
   };
 
-  // Handler to disconnect exchange integration
   const handleDisconnectExchange = async (exchange: string) => {
     try {
-      const res = await fetch("/api/exchange-disconnect", {
+      await apiJson("/api/exchange-disconnect", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ exchange })
+        body: JSON.stringify({ exchange }),
       });
-      if (res.ok) {
-        fetchState();
-        alert(`✔ ${exchange.toUpperCase()} exchange integration disconnected successfully.`);
-      }
+      fetchState();
     } catch (err) {
       console.error("Disconnect exchange failed", err);
     }
   };
 
-  // Handler to launch quantitative agent for selected token signal
   const handleActivateSignalAgent = async (ticker: string, size: number) => {
-    // Log immediate action to logs
     try {
-      const res = await fetch("/api/logs", {
+      const res = await apiFetch("/api/logs", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: "BUY",
-          pair: `${ticker}/USDT`,
-          volume: `$${size.toFixed(2)}`,
-          status: "Filled"
+          type: "BUY", pair: `${ticker}/USDT`, volume: `$${size.toFixed(2)}`, status: "Filled"
         })
       });
-      if (res.ok) {
-        // Mock add position state
-        const newPosition = {
-          id: String(Date.now()),
-          pair: `${ticker}/USDT`,
-          size: size,
-          pnl: 0.0,
-          buyPrice: ticker === "WIF" ? 2.15 : 7.20,
-          currentPrice: ticker === "WIF" ? 2.15 : 7.20,
-          logo: ticker.slice(0, 1)
-        };
-        setUserState(prev => ({
-          ...prev,
-          positions: [...prev.positions, newPosition]
-        }));
-        
-        // Switch tab to Home so they can watch the live position immediately
-        setCurrentTab("home");
-        alert(`⚡ Quantitative Agent Activated for $${ticker} with size $${size.toFixed(2)}. Monitoring position.`);
-      }
+      
+      // Optimistic position add — server will also create DB entry
+      const newPosition = {
+        id: String(Date.now()),
+        pair: `${ticker}/USDT`,
+        size,
+        pnl: 0,
+        buyPrice: 0,
+        currentPrice: 0,
+        logo: ticker.slice(0, 1).toUpperCase()
+      };
+      setUserState(prev => ({
+        ...prev,
+        positions: [...prev.positions, newPosition]
+      }));
+      setCurrentTab("home");
     } catch (err) {
       console.error("Failed to activate agent", err);
     }
@@ -373,12 +335,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#101416] text-zinc-100 flex justify-center selection:bg-[#c6ff34] selection:text-black">
-      {/* Centered TMA phone viewport layout on wider monitors, fluid on real phones */}
       <div className="w-full max-w-[480px] min-h-screen flex flex-col bg-[#171717] relative shadow-2xl shadow-black border-x border-zinc-900 px-4">
         
         {/* Main Content Render Area */}
         <div className="flex-1 overflow-y-auto no-scrollbar pt-2 relative">
-          {/* Graceful Network & Offline State Banner Overlay (Full-screen blocking) */}
+          {/* Offline Banner */}
           {networkOffline && (
             <div className="absolute inset-0 z-50 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center space-y-5 animate-fade-in">
               <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center animate-pulse shadow-lg shadow-amber-500/5">
@@ -387,16 +348,20 @@ export default function App() {
               <div className="space-y-2">
                 <h3 className="font-sans text-sm font-black uppercase tracking-wider text-amber-400">CONNECTIVITY STANDBY</h3>
                 <p className="text-xs text-zinc-400 max-w-[280px] mx-auto leading-relaxed">
-                  The connection node was interrupted. All trading vectors have been secured. Restore connection or verify servers to resume actions.
+                  The connection node was interrupted. All trading vectors have been secured. Restore connection to resume.
                 </p>
-                <div className="flex items-center justify-center gap-1.5 pt-2 text-[9px] text-zinc-500 font-mono uppercase font-bold tracking-wider">
-                  <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping"></span>
-                  <span>Polling backup Standby gateway...</span>
-                </div>
               </div>
 
               <button 
-                onClick={handleRestoreCheck} 
+                onClick={async () => {
+                  try {
+                    const res = await fetch("/health", { cache: "no-store" });
+                    if (res.ok) {
+                      setNetworkOffline(false);
+                      fetchState();
+                    }
+                  } catch {}
+                }}
                 className="w-full max-w-[220px] bg-amber-500 text-black font-black py-3 rounded-xl uppercase tracking-wider hover:brightness-110 active:scale-[0.98] transition-all text-[11px] cursor-pointer shadow-lg shadow-amber-500/20"
               >
                 RE-ESTABLISH CONNECTION
@@ -461,57 +426,26 @@ export default function App() {
           )}
         </div>
 
-        {/* Bottom Fixed Navigation Bar conforming to guidelines */}
+        {/* Bottom Fixed Navigation Bar */}
         <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] h-[72px] bg-[#1c2023] border-t border-zinc-800 flex items-center justify-around px-2 z-50 shadow-2xl shadow-black rounded-t-2xl">
-          <button
-            onClick={() => setCurrentTab("home")}
-            className={`flex flex-col items-center justify-center gap-1 w-14 transition-all duration-200 ${
-              currentTab === "home" ? "text-[#c6ff34] scale-105" : "text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            <Home className="w-5 h-5" />
-            <span className="text-[10px] font-bold tracking-wider">Home</span>
-          </button>
-
-          <button
-            onClick={() => setCurrentTab("wallet")}
-            className={`flex flex-col items-center justify-center gap-1 w-14 transition-all duration-200 ${
-              currentTab === "wallet" ? "text-[#c6ff34] scale-105" : "text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            <WalletIcon className="w-5 h-5" />
-            <span className="text-[10px] font-bold tracking-wider">Wallet</span>
-          </button>
-
-          <button
-            onClick={() => setCurrentTab("strategy")}
-            className={`flex flex-col items-center justify-center gap-1 w-14 transition-all duration-200 ${
-              currentTab === "strategy" ? "text-[#c6ff34] scale-105" : "text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            <Sliders className="w-5 h-5" />
-            <span className="text-[10px] font-bold tracking-wider">Strategy</span>
-          </button>
-
-          <button
-            onClick={() => setCurrentTab("intel")}
-            className={`flex flex-col items-center justify-center gap-1 w-14 transition-all duration-200 ${
-              currentTab === "intel" ? "text-[#c6ff34] scale-105" : "text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            <Zap className="w-5 h-5" />
-            <span className="text-[10px] font-bold tracking-wider">Intel</span>
-          </button>
-
-          <button
-            onClick={() => setCurrentTab("logs")}
-            className={`flex flex-col items-center justify-center gap-1 w-14 transition-all duration-200 ${
-              currentTab === "logs" ? "text-[#c6ff34] scale-105" : "text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            <History className="w-5 h-5" />
-            <span className="text-[10px] font-bold tracking-wider">Logs</span>
-          </button>
+          {[
+            { tab: "home" as const, icon: Home, label: "Home" },
+            { tab: "wallet" as const, icon: WalletIcon, label: "Wallet" },
+            { tab: "strategy" as const, icon: Sliders, label: "Strategy" },
+            { tab: "intel" as const, icon: Zap, label: "Intel" },
+            { tab: "logs" as const, icon: History, label: "Logs" },
+          ].map(({ tab, icon: Icon, label }) => (
+            <button
+              key={tab}
+              onClick={() => setCurrentTab(tab)}
+              className={`flex flex-col items-center justify-center gap-1 w-14 transition-all duration-200 ${
+                currentTab === tab ? "text-[#c6ff34] scale-105" : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <Icon className="w-5 h-5" />
+              <span className="text-[10px] font-bold tracking-wider">{label}</span>
+            </button>
+          ))}
         </nav>
       </div>
     </div>

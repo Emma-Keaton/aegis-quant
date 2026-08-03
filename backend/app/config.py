@@ -1,9 +1,15 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List, Optional
+from typing import List, Optional, Dict
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
+    # QuantDinger integration
+    DISABLE_QUANTDINGER_TOKEN_AUTH: bool = True
+    QUANTDINGER_BASE_URL: str = "http://quantdinger-backend:5000"
+    QUANTDINGER_AGENT_TOKEN: str = ""
+    TELEGRAM_ADMIN_CHAT_ID: int = 0
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -17,12 +23,26 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     ENVIRONMENT: str = "development"
 
-    # Database
-    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/aegis_quant"
+    # ── Supabase Database ──────────────────────────────────────────────
+    # Option 1: Direct connection (better for local/dev)
+    # Format: postgresql://postgres.[PROJECT_REF]:[PASSWORD]@db.[PROJECT_REF].supabase.co:5432/postgres
+    DATABASE_URL: str = ""
+    
+    # Option 2: Pooler connection (recommended for production/serverless)
+    # Format: postgresql://postgres.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION]-pooler.postgres.vercel-storage.com:6543/postgres
+    DATABASE_POOL_URL: str = ""  # Use this if DATABASE_URL is for direct conn
+    
+    # Supabase project info (for client library)
+    SUPABASE_URL: str = "https://your-project.supabase.co"
+    SUPABASE_ANON_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    
+    # SQLAlchemy pool settings
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
+    DATABASE_SSL_MODE: str = "require"  # Supabase requires SSL
 
-    # Redis
+    # Redis (optional - for caching/rate limiting)
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # Encryption
@@ -32,20 +52,20 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_BOT_USERNAME: str = "aegisquantbot"
     APP_URL: str = "http://localhost:3000"
+    ADMIN_CHAT_ID: Optional[int] = None
+    TELEGRAM_WEBHOOK_SECRET: str = ""
 
-    # Kronos AI (Render)
+    # AI Services
+    KRONOS_SERVICE_URL: str = ""
     KRONOS_API_URL: str = "https://kronos-ai.onrender.com"
     KRONOS_API_KEY: str = ""
-
-    # Gemini (3-key rotation for free tier)
+    
     GEMINI_API_KEY_1: str = ""
     GEMINI_API_KEY_2: str = ""
     GEMINI_API_KEY_3: str = ""
-
-    # Groq (ticker parsing)
-    GROQ_API_KEY: str = ""
-
     
+    GROQ_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     # Scraper Accounts
     TWITTER_ACCOUNTS_JSON: str = "[]"
@@ -55,21 +75,68 @@ class Settings(BaseSettings):
     REDDIT_CLIENT_ID: str = ""
     REDDIT_CLIENT_SECRET: str = ""
 
-    # Engine A Trigger Thresholds
+    # Engine Thresholds
     ENGINE_A_PRICE_CHANGE_THRESHOLD: float = 0.02
     ENGINE_A_VOLUME_SPIKE_THRESHOLD: float = 3.0
     ENGINE_A_SPREAD_BPS_THRESHOLD: int = 10
     ENGINE_A_FUNDING_FLIP_ENABLED: bool = True
     ENGINE_A_MIN_CONFIDENCE: float = 0.70
 
+    # Security
+    CORS_ORIGINS: List[str] = ["*"]
+    SESSION_SECRET: str = ""
+    SESSION_TTL_HOURS: int = 720
+    
+    # Rate limiting
+    RATE_LIMIT_REQUESTS: int = 60
+    RATE_LIMIT_WINDOW: int = 60
+    
+    # Execution
+    AUTO_CONFIDENCE_THRESHOLD: int = 75
+    KRONOS_TIMEOUT: float = 10.0
+
+    # Bot commands
+    BOT_COMMANDS: List[Dict[str, str]] = [
+        {"command": "start", "description": "Launch Mini App with trading bot"},
+        {"command": "help", "description": "Show available commands"},
+        {"command": "profile", "description": "View trading profile"},
+        {"command": "mode", "description": "Set trading mode (paper/live)"},
+        {"command": "toggle_bot", "description": "Enable/disable trading agent"},
+        {"command": "signals", "description": "View current signals"},
+    ]
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"
-
-    # CORS
-    CORS_ORIGINS: List[str] = ["*"]
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def get_database_url() -> str:
+    """Get the appropriate database URL with Supabase-specific settings."""
+    settings = get_settings()
+    
+    # Use pool URL if available, otherwise direct URL
+    db_url = settings.DATABASE_POOL_URL or settings.DATABASE_URL
+    
+    if not db_url:
+        # Fallback to SQLite for development
+        print("[DB] WARNING: DATABASE_URL not set — using SQLite for development")
+        return "sqlite+aiosqlite:///./dev_local.db"
+    
+    # Ensure proper async driver
+    if db_url.startswith("postgresql://") and not db_url.startswith("postgresql+"):
+        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    
+    # Add Supabase-specific params
+    if "supabase" in db_url or "vercel-storage" in db_url:
+        # Ensure SSL is enabled for Supabase
+        if "sslmode" not in db_url:
+            db_url += "?sslmode=require"
+        # Pooler uses port 6543
+        db_url = db_url.replace(":5432/", ":6543/")
+    
+    return db_url

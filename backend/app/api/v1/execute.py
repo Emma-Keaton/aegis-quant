@@ -8,7 +8,7 @@ from uuid import UUID
 
 from app.database import get_db
 from app.core.telegram_auth import get_current_user
-from app.models import Profile, Position, TradeLog, TradeMode, OrderSide, OrderStatus, ExecutionType
+from app.models import Profile, Position, TradeLog, TradeMode, OrderSide, OrderStatus, ExecutionType, PaperBalance
 
 router = APIRouter(prefix="/execute", tags=["execution"])
 
@@ -22,6 +22,8 @@ class ExecuteRequest(BaseModel):
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     exchange: str = "bybit"
+    exchange_type: Literal["centralized", "solana"] = "centralized"
+    wallet_address: Optional[str] = None  # required only for solana execution
     auto_approve: bool = False
 
 
@@ -77,9 +79,43 @@ async def execute_trade(
         )
     
     # Calculate size based on max allocation
+    # ------------------------------------------------------------------
+    # If the request asks for auto‑approval, we first let Gemini (via
+    # Google AI Studio) build a concrete execution order and we dispatch it
+    # to the appropriate wallet (CCXT or Solana) before we record anything.
+    # ------------------------------------------------------------------
+    from app.services.execute_via_wallet import execute_trade_via_llm, ExecutionError
+    if request.auto_approve:
+        prompt = f"""Execute trade:
+Symbol: {request.symbol}
+Side: {request.side}
+Size: {request.size}
+Price: {request.price or 'market'}
+StopLoss: {request.stop_loss or ''}
+TakeProfit: {request.take_profit or ''}
+Exchange: {request.exchange}
+ExchangeType: {request.exchange_type}
+WalletAddress: {request.wallet_address or ''}"""
+        try:
+            exec_result = await execute_trade_via_llm(
+                task_prompt=prompt,
+                exchange_type=request.exchange_type,
+                exchange_name=request.exchange,
+                wallet_address=request.wallet_address,
+            )
+        except ExecutionError as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+        # Store the external identifier for later reference (order_id or tx_hash)
+        request.__dict__["external_id"] = exec_result.get("order_id") or exec_result.get("tx_hash")
+    # ------------------------------------------------------------------
     from app.core.math_helpers import kelly_criterion, calculate_position_size
     
-    balance = 10000  # TODO: Get from paper/live balance
+    # Get paper balance
+    pb_result = await db.execute(
+        select(PaperBalance).where(PaperBalance.profile_id == profile.id)
+    )
+    paper_bal = pb_result.scalar_one_or_none()
+    balance = float(paper_bal.balance) if paper_bal else 10000.0
     position_size = calculate_position_size(
         balance=balance,
         max_allocation_pct=float(profile.max_allocation_pct),
@@ -107,6 +143,8 @@ async def execute_trade(
     db.add(position)
     
     # Create trade log
+    # Record the trade log – include external identifiers if we auto‑approved
+    external_id = request.__dict__.get("external_id")
     trade_log = TradeLog(
         profile_id=profile.id,
         symbol=request.symbol.upper(),
@@ -117,6 +155,8 @@ async def execute_trade(
         price=request.price or 0,
         total_value_usd=actual_size * (request.price or 0),
         status=OrderStatus.FILLED if profile.trading_mode == TradeMode.PAPER else OrderStatus.PENDING,
+        order_id=external_id if request.exchange_type == "centralized" else None,
+        tx_hash=external_id if request.exchange_type == "solana" else None,
     )
     db.add(trade_log)
     

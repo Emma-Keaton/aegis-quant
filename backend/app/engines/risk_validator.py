@@ -10,7 +10,7 @@ from app.core.math_helpers import (
     calculate_position_size,
     kelly_criterion
 )
-from app.engines.kronos_client import KronosClient
+from app.services.kronos_service import get_kronos_client
 
 
 @dataclass
@@ -182,12 +182,35 @@ class RiskValidator:
     
     async def _get_balance(self, profile: Profile) -> float:
         """Get available balance (paper or live)"""
-        # TODO: Implement actual balance fetching
-        # For paper trading, return from paper_balances table
-        # For live, fetch from exchange
+        from app.database import AsyncSessionLocal
+        from app.models import PaperBalance
+        from sqlalchemy import select
+        
+        async with AsyncSessionLocal() as db:
+            pb_result = await db.execute(
+                select(PaperBalance).where(PaperBalance.profile_id == profile.id)
+            )
+            paper_bal = pb_result.scalar_one_or_none()
+            if paper_bal:
+                return float(paper_bal.balance)
         return 10000.0  # Default paper balance
     
     async def _get_current_drawdown(self, profile: Profile) -> float:
-        """Calculate current daily drawdown percentage"""
-        # TODO: Implement from trade_logs
-        return 0.0
+        """Calculate current daily drawdown from trade logs"""
+        from app.database import AsyncSessionLocal
+        from app.models import TradeLog, OrderStatus
+        from sqlalchemy import select, func
+        from datetime import datetime, timezone
+        
+        async with AsyncSessionLocal() as db:
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            result = await db.execute(
+                select(func.coalesce(func.sum(TradeLog.total_value_usd), 0))
+                .where(TradeLog.profile_id == profile.id)
+                .where(TradeLog.executed_at >= today_start)
+                .where(TradeLog.side == OrderSide.SELL)
+            )
+            realized_losses = float(result.scalar() or 0)
+            if realized_losses <= 0:
+                return 0.0
+            return min(realized_losses / 10000.0 * 100, 100.0)

@@ -1,0 +1,25 @@
+name: event_driven
+display_name: 事件驱动
+description: 基于新闻、社交媒体或链上事件的交易信号。
+category: framework
+core_rules: [5, 6]
+required_tools:
+  - search_stock_news
+  - get_daily_history
+aliases: [事件, 新闻驱动]
+default_active: true
+default_router: true
+default_priority: 15
+market_regimes: [event]
+instructions: |
+  **事件驱动（Event‑Driven Strategy）**
+
+  1. **事件收集**：使用 `search_stock_news` 检索最近 24 小时内的加密新闻、链上治理提案或重大社区投票。
+  2. **情感分析**：对标题和摘要执行情感分析（正面/负面），并将结果映射到 0‑100 分钟数值。
+  3. **价格验证**：使用 `get_daily_history` 检查对应币种的价格是否在过去 1 小时内出现显著波动（> 3%）。
+  4. **信号生成**：如果情感分 ≥ 70 且价格波动满足条件，生成买入信号；情感分 ≤ 30 则生成卖出信号。
+
+  评分调整：
+  - 正面高情感 + 大幅涨幅：sentiment_score +15
+  - 负面高情感 + 大幅跌幅：sentiment_score -15
+  - 中性或低情感：sentiment_score +/- 0

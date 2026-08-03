@@ -1,9 +1,17 @@
+import json
+import logging
+from typing import Optional, Dict
+
 from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 
 from app.core.telegram_auth import get_current_user, verify_telegram_init_data
 from app.config import get_settings
+from app.database import AsyncSessionLocal
+from app.models import Profile
+from app.telegram.bot_handler import process_user_message, send_message
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 

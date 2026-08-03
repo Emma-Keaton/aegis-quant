@@ -52,6 +52,16 @@ class Profile(Base):
     last_name = Column(String(100), nullable=True)
     language_code = Column(String(10), nullable=True)
     
+    # Wallet
+    wallet_connected = Column(Boolean, default=False, nullable=False)
+    wallet_address = Column(String(64), nullable=True)
+    wallet_network = Column(String(10), nullable=True)
+    wallet_public_key = Column(String(128), nullable=True)
+    
+    # Engine B config
+    engine_b_enabled = Column(Boolean, default=True, nullable=False)
+    engine_b_min_confidence = Column(Numeric(3, 2), default=0.70)
+    
     # Trading settings
     risk_level = Column(SQLEnum(RiskLevel), default=RiskLevel.MEDIUM, nullable=False)
     max_allocation_pct = Column(Numeric(5, 2), default=10.0, nullable=False)
@@ -79,6 +89,11 @@ class Profile(Base):
     alerts = relationship("AlertRule", back_populates="profile", cascade="all, delete-orphan")
     execution_audit = relationship("ExecutionAudit", back_populates="profile", cascade="all, delete-orphan")
     risk_settings = relationship("RiskSettings", back_populates="profile", uselist=False, cascade="all, delete-orphan")
+    copytrade_subscriptions = relationship(
+        "CopyTradeSubscription",
+        back_populates="profile",
+        cascade="all, delete-orphan"
+    )
 
 
 class UserCredential(Base):
@@ -123,6 +138,7 @@ class RiskSettings(Base):
     max_concurrent_trades = Column(Integer, default=3, nullable=False)
     max_daily_drawdown_pct = Column(Numeric(5, 2), default=5.0, nullable=False)
     whitelist_only = Column(Boolean, default=True, nullable=False)
+    base_trade_usd = Column(Numeric(5, 2), default=10.0, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     profile = relationship("Profile", back_populates="risk_settings")
@@ -253,3 +269,57 @@ class ExecutionAudit(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False, index=True)
 
     profile = relationship("Profile", back_populates="execution_audit")
+
+
+class UserSession(Base):
+    """Authentication session — tied to telegram_id, carries a signed JWT-like token."""
+    __tablename__ = "user_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    telegram_id = Column(BigInteger, nullable=False, index=True)
+    profile_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=True)
+    token = Column(String(512), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    profile = relationship("Profile")
+
+
+class CopyTradeChannel(Base):
+    """Subscription to a Telegram channel for copy-trading signals."""
+    __tablename__ = "copytrade_channels"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    profile_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    channel_id = Column(String(50), nullable=False)
+    confidence_threshold = Column(Integer, default=70, nullable=False)
+    telegram_poll_token = Column(String(512), nullable=True)  # per-channel token for polling
+    active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # Legacy table — use CopyTradeSubscription for new code
+
+    __table_args__ = (
+        UniqueConstraint("profile_id", "channel_id", name="uq_profile_channel"),
+    )
+
+
+class CopyTradeSubscription(Base):
+    """User's subscription to a copy-trade channel."""
+    __tablename__ = "copytrade_subscriptions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    profile_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    channel_id = Column(String(50), nullable=False, index=True)
+    confidence_threshold = Column(Integer, default=70, nullable=False)
+    active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    profile = relationship("Profile", back_populates="copytrade_subscriptions")
+
+    __table_args__ = (
+        UniqueConstraint("profile_id", "channel_id", name="uq_profile_channel_sub"),
+    )

@@ -1,0 +1,57 @@
+services:
+  # ── Backend API ─────────────────────────────────────────────────
+  - type: web
+    name: aegis-quant-backend
+    env: python
+    region: oregon
+    plan: starter
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_USERNAME
+        value: aegisquantbot
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: GEMINI_API_KEY_1
+        sync: false
+      - key: GEMINI_API_KEY_2
+        sync: false
+      - key: GEMINI_API_KEY_3
+        sync: false
+      - key: APP_URL
+        fromService:
+          name: aegis-quant-backend
+          type: web
+          envVarName: RENDER_EXTERNAL_URL
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SOLANA_RPC_URL
+        value: https://api.mainnet-beta.solana.com
+      - key: WALLET_CONNECT_PROJECT_ID
+        sync: false
+
+  # ── Frontend (Static Site) ──────────────────────────────────────
+  - type: web
+    name: aegis-quant-frontend
+    env: static
+    region: oregon
+    plan: starter
+    buildCommand: npm install --legacy-peer-deps && npm run build
+    publishDir: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: 20

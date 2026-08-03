@@ -1,78 +1,77 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel, Field
-from typing import Optional, List, Literal
+"""Alert rules — persisted to PostgreSQL."""
 
-from app.database import get_db
+import logging
+from datetime import datetime, timezone
+from typing import Optional, List
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.telegram_auth import get_current_user
+from app.database import get_db
 from app.models import Profile, AlertRule
 
-router = APIRouter(prefix="/rules", tags=["rules"])
+logger = logging.getLogger(__name__)
+router = APIRouter(tags=["rules"])
 
 
-class AlertRuleCreate(BaseModel):
-    metric: str = Field(..., description="Metric to monitor (e.g., 'Portfolio Drawdown', 'RSI (14) SOL')")
-    condition: str = Field(..., description="Condition: >, <, >=, <=, ==, crosses_above, crosses_below")
-    value: str = Field(..., description="Threshold value")
-    action: str = Field(..., description="Action to take (e.g., 'Pause TON Grid Bot', 'Send Telegram Alert & Buy SOL')")
+class RuleCreate(BaseModel):
+    metric: str = Field(..., min_length=1, max_length=100)
+    condition: str = Field(..., min_length=1, max_length=20)
+    value: str = Field(..., min_length=1, max_length=50)
+    action: str = Field(..., min_length=1, max_length=200)
 
 
-class AlertRuleUpdate(BaseModel):
-    metric: Optional[str] = None
-    condition: Optional[str] = None
-    value: Optional[str] = None
-    action: Optional[str] = None
-    active: Optional[bool] = None
-
-
-class AlertRuleResponse(BaseModel):
+class RuleItem(BaseModel):
     id: str
     metric: str
     condition: str
     value: str
     action: str
     active: bool
-    created_at: str
-    triggered_at: Optional[str]
-    trigger_count: int
-    
-    class Config:
-        from_attributes = True
 
 
-@router.get("", response_model=List[AlertRuleResponse])
+class RulesResponse(BaseModel):
+    status: str
+    data: List[RuleItem]
+    allRules: List[RuleItem] = []
+
+
+@router.get("/api/rules")
 async def get_rules(
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all alert rules for user"""
     telegram_id = user["id"]
     result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
     profile = result.scalar_one_or_none()
-    
     if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
+        return RulesResponse(status="success", data=[])
     
-    rules_result = await db.execute(
+    res = await db.execute(
         select(AlertRule).where(AlertRule.profile_id == profile.id).order_by(AlertRule.created_at.desc())
     )
-    rules = rules_result.scalars().all()
+    rules = res.scalars().all()
     
-    return [AlertRuleResponse.model_validate(r) for r in rules]
+    data = [RuleItem(
+        id=str(r.id), metric=r.metric, condition=r.condition,
+        value=r.value, action=r.action, active=r.active,
+    ) for r in rules]
+    
+    return RulesResponse(status="success", data=data, allRules=data)
 
 
-@router.post("", response_model=AlertRuleResponse, status_code=201)
+@router.post("/api/rules", response_model=RulesResponse)
 async def create_rule(
-    rule: AlertRuleCreate,
+    rule: RuleCreate,
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create new alert rule"""
     telegram_id = user["id"]
     result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
     profile = result.scalar_one_or_none()
-    
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     
@@ -82,75 +81,42 @@ async def create_rule(
         condition=rule.condition,
         value=rule.value,
         action=rule.action,
-        active=True
+        active=True,
     )
     db.add(new_rule)
     await db.commit()
     await db.refresh(new_rule)
     
-    return AlertRuleResponse.model_validate(new_rule)
+    all_res = await db.execute(select(AlertRule).where(AlertRule.profile_id == profile.id))
+    all_rules = all_res.scalars().all()
+    
+    data = [RuleItem(id=str(r.id), metric=r.metric, condition=r.condition,
+                     value=r.value, action=r.action, active=r.active) for r in all_rules]
+    
+    return RulesResponse(status="success", data=data, allRules=data)
 
 
-@router.patch("/{rule_id}", response_model=AlertRuleResponse)
-async def update_rule(
-    rule_id: str,
-    updates: AlertRuleUpdate,
-    user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Update alert rule"""
-    import uuid
-    telegram_id = user["id"]
-    result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
-    profile = result.scalar_one_or_none()
-    
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
-    
-    rule_result = await db.execute(
-        select(AlertRule).where(
-            AlertRule.id == uuid.UUID(rule_id),
-            AlertRule.profile_id == profile.id
-        )
-    )
-    rule = rule_result.scalar_one_or_none()
-    
-    if not rule:
-        raise HTTPException(status_code=404, detail="Rule not found")
-    
-    update_data = updates.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(rule, key, value)
-    
-    await db.commit()
-    await db.refresh(rule)
-    
-    return AlertRuleResponse.model_validate(rule)
-
-
-@router.post("/{rule_id}/toggle", response_model=AlertRuleResponse)
+@router.post("/api/rules/toggle")
 async def toggle_rule(
-    rule_id: str,
+    request: dict,
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Toggle rule active status"""
+    rule_id = request.get("id")
+    if not rule_id:
+        raise HTTPException(status_code=400, detail="id required")
+    
     import uuid
     telegram_id = user["id"]
     result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
     profile = result.scalar_one_or_none()
-    
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     
-    rule_result = await db.execute(
-        select(AlertRule).where(
-            AlertRule.id == uuid.UUID(rule_id),
-            AlertRule.profile_id == profile.id
-        )
+    res = await db.execute(
+        select(AlertRule).where(AlertRule.id == uuid.UUID(rule_id), AlertRule.profile_id == profile.id)
     )
-    rule = rule_result.scalar_one_or_none()
-    
+    rule = res.scalar_one_or_none()
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
     
@@ -158,36 +124,38 @@ async def toggle_rule(
     await db.commit()
     await db.refresh(rule)
     
-    return AlertRuleResponse.model_validate(rule)
+    return {"status": "success", "allRules": [
+        {"id": str(r.id), "metric": r.metric, "condition": r.condition,
+         "value": r.value, "action": r.action, "active": r.active}
+        for r in [rule]
+    ]}
 
 
-@router.delete("/{rule_id}")
+@router.post("/api/rules/delete")
 async def delete_rule(
-    rule_id: str,
+    request: dict,
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete alert rule"""
+    rule_id = request.get("id")
+    if not rule_id:
+        raise HTTPException(status_code=400, detail="id required")
+    
     import uuid
     telegram_id = user["id"]
     result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
     profile = result.scalar_one_or_none()
-    
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     
-    rule_result = await db.execute(
-        select(AlertRule).where(
-            AlertRule.id == uuid.UUID(rule_id),
-            AlertRule.profile_id == profile.id
-        )
+    res = await db.execute(
+        select(AlertRule).where(AlertRule.id == uuid.UUID(rule_id), AlertRule.profile_id == profile.id)
     )
-    rule = rule_result.scalar_one_or_none()
-    
+    rule = res.scalar_one_or_none()
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
     
     await db.delete(rule)
     await db.commit()
     
-    return {"message": "Rule deleted"}
+    return {"status": "success"}

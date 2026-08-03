@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import CopyTradeManager from "./CopyTradeManager";
 import { Zap, RefreshCw, Radio, Sparkles, MessageSquare, Flame } from "lucide-react";
 import { MarketSignal } from "../types";
 
@@ -218,6 +219,7 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
         )}
       </div>
 
+      <CopyTradeManager />
       {/* Decorative convergence analytics block from design specs */}
       <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-5 relative overflow-hidden h-32 flex flex-col justify-end">
         <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-transparent z-10"></div>

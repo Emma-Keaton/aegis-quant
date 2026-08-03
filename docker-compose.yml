@@ -70,6 +70,29 @@ services:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
+  # ── QuantDinger service (AI‑automated trading backend) ────────────────────────
+  # NOTE: When deploying to Render, set the following env vars in the Render service settings:
+  #   QUANTDINGER_DATABASE_URL – PostgreSQL connection string for QuantDinger (e.g. postgres://user:pass@host:5432/quantdinger)
+  #   QUANTDINGER_SECRET_KEY   – Secure random secret (generate with `openssl rand -hex 32`)
+  #   QUANTDINGER_AGENT_TOKEN  – Agent token (create via QuantDinger admin UI; see README)
+  quantdinger:
+    image: ghcr.io/brokermr810/quantdinger-backend:latest
+    container_name: quantdinger-backend
+    environment:
+      - DATABASE_URL=${QUANTDINGER_DATABASE_URL}
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${QUANTDINGER_SECRET_KEY}
+      - AGENT_TOKEN=${QUANTDINGER_AGENT_TOKEN}
+    ports:
+      - "5001:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - default
+
 volumes:
   postgres_data:
   redis_data:

@@ -1,12 +1,76 @@
 import React, { useState, useEffect } from "react";
-import { History, Search, ArrowUpRight, ArrowDownRight, RefreshCw, ExternalLink, Calendar, Filter } from "lucide-react";
+import { History, Search, ArrowUpRight, ArrowDownRight, RefreshCw, ExternalLink, Calendar, Filter, ShieldAlert, Shield } from "lucide-react";
 import { TransactionLog } from "../types";
+import { getSessionToken, clearSession } from "../api/client";
+import AdminDashboard from "./AdminDashboard";
+
+// Helper component for the admin button
+function AdminButton() {
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  // Check admin status on mount
+  useEffect(() => {
+    const checkAdmin = async () => {
+      try {
+        const token = getSessionToken();
+        if (token) {
+          // Verify admin status by calling /admin/status with session token
+          const res = await fetch("/admin/status", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            setIsAdmin(true);
+          } else {
+            setIsAdmin(false);
+          }
+        } else {
+          setIsAdmin(false);
+        }
+      } catch (err) {
+        console.error("Admin check failed:", err);
+        setIsAdmin(false);
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkAdmin();
+  }, []);
+
+  if (loading) {
+    return null; // Don't show anything while checking auth
+  }
+
+  if (!isAdmin) {
+    // Non-admin users see a grayed-out button that shows a popup message when clicked
+    return (
+      <button
+        onClick={() => alert("Admin access denied. Only the designated administrator chat ID can access this feature. Contact support.")}
+        className="bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-[#c6ff34] hover:border-[#c6ff34]/40 text-xs px-3 py-1.5 rounded-xl transition-all flex items-center gap-1"
+        title="Admin access required"
+      >
+        <ShieldAlert className="w-3.5 h-3.5" /> Admin
+      </button>
+    );
+  }
+
+  // Admin user sees the green button
+  return (
+    <button
+      onClick={() => setShowAdminModal(true)}
+      className="bg-[#c6ff34] text-black font-bold text-xs px-3 py-1.5 rounded-xl hover:bg-[#b0f020] transition-all flex items-center gap-1"
+    >
+      <Shield className="w-3.5 h-3.5" /> Admin
+    </button>
+  );
+}
 
 export default function Logs() {
   const [logs, setLogs] = useState<TransactionLog[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [timeframeFilter, setTimeframeFilter] = useState<string>("ALL");
+  const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
 
   const fetchLogs = async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -60,19 +124,21 @@ export default function Logs() {
           <History className="w-5 h-5 text-[#c6ff34]" />
           <h2 className="text-lg font-black tracking-wider uppercase text-[#c6ff34]">TRANSACTION LOGS</h2>
         </div>
-        <button
-          onClick={handleSimulateInboundLog}
-          className="bg-zinc-900 border border-zinc-800 hover:border-[#c6ff34]/40 text-white font-bold text-xs px-3 py-1.5 rounded-xl transition-all font-mono"
-        >
-          + TEST TRADE EVENT
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleSimulateInboundLog}
+            className="bg-zinc-900 border border-zinc-800 hover:border-[#c6ff34]/40 text-white font-bold text-xs px-3 py-1.5 rounded-xl transition-all font-mono"
+          >
+            + TEST TRADE EVENT
+          </button>
+          <AdminButton />
+        </div>
       </div>
 
       {/* Filter Section Dropdowns */}
       <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4 space-y-3">
         <p className="text-[10px] uppercase tracking-widest text-[#c6ff34] font-black px-1 flex items-center gap-1">
-          <Filter className="w-3.5 h-3.5" />
-          FILTER LOG CONTROLS
+          <Filter className="w-3.5 h-3.5" /> FILTER LOG CONTROLS
         </p>
 
         <div className="grid grid-cols-2 gap-2">
@@ -110,7 +176,7 @@ export default function Logs() {
       </div>
 
       {/* Execution Logs List */}
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         {loading ? (
           <div className="space-y-2">
             {[1, 2, 3].map((i) => (
@@ -158,7 +224,7 @@ export default function Logs() {
                   </div>
 
                   {/* Status & Volume display */}
-                  <div className="flex items-center justify-between sm:justify-end gap-6 sm:text-right border-t border-zinc-800/40 sm:border-none pt-2 sm:pt-0">
+                  <div className="flex items-center sm:justify-end sm:col-span-2 gap-6 sm:border-t sm:border-zinc-800/40 sm:pt-2 sm:pt-0 sm:mt-2 sm:mt-0">
                     <div className="sm:hidden text-[9px] uppercase text-zinc-500 font-black">Details</div>
                     <div className="flex items-center sm:flex-col gap-4 sm:gap-1.5">
                       <p className="text-xs font-mono text-zinc-300 font-extrabold">{log.volume}</p>
@@ -190,6 +256,23 @@ export default function Logs() {
           </div>
         )}
       </div>
+
+      {/* Admin Modal */}
+      {showAdminModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowAdminModal(false)}>
+          <div className="bg-[#1c2023] border border-[#c6ff34]/30 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="border-b border-zinc-800 p-4 flex justify-between items-center bg-zinc-900/50">
+              <h3 className="text-lg font-bold text-[#c6ff34] flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5" /> Admin Dashboard
+              </h3>
+              <button onClick={() => setShowAdminModal(false)} className="text-zinc-400 hover:text-[#c6ff34] p-1 rounded-lg transition-all">×</button>
+            </div>
+            <div className="flex-1 overflow-auto p-6 bg-zinc-950/30">
+              <AdminDashboard onLogout={() => { clearSession(); setShowAdminModal(false); }} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

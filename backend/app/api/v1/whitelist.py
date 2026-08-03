@@ -5,7 +5,7 @@ from typing import List
 
 from app.database import get_db
 from app.core.telegram_auth import get_current_user
-from app.models import UserWhitelist
+from app.models import Profile, UserWhitelist
 from app.schemas.whitelist import WhitelistAdd, WhitelistResponse
 
 router = APIRouter(prefix="/whitelist", tags=["whitelist"])
@@ -17,12 +17,18 @@ async def get_whitelist(
     db: AsyncSession = Depends(get_db)
 ):
     """Get user's Engine A whitelist"""
-    result = await db.execute(
+    telegram_id = user["id"]
+    result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
+    wl_result = await db.execute(
         select(UserWhitelist)
-        .where(UserWhitelist.profile_id == user["id"])
+        .where(UserWhitelist.profile_id == profile.id)
         .where(UserWhitelist.active == True)
     )
-    whitelist = result.scalars().all()
+    whitelist = wl_result.scalars().all()
     return [
         WhitelistResponse(
             symbol=w.symbol,
@@ -42,14 +48,20 @@ async def add_to_whitelist(
     db: AsyncSession = Depends(get_db)
 ):
     """Add symbol to Engine A whitelist"""
+    telegram_id = user["id"]
+    result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
     # Check if already exists
-    result = await db.execute(
+    existing_result = await db.execute(
         select(UserWhitelist)
-        .where(UserWhitelist.profile_id == user["id"])
+        .where(UserWhitelist.profile_id == profile.id)
         .where(UserWhitelist.symbol == payload.symbol.upper())
         .where(UserWhitelist.exchange == payload.exchange)
     )
-    existing = result.scalar_one_or_none()
+    existing = existing_result.scalar_one_or_none()
     
     if existing:
         if existing.active:
@@ -59,7 +71,7 @@ async def add_to_whitelist(
         return WhitelistResponse.model_validate(existing)
     
     whitelist_item = UserWhitelist(
-        profile_id=user["id"],
+        profile_id=profile.id,
         symbol=payload.symbol.upper(),
         exchange=payload.exchange,
         timeframe=payload.timeframe,
@@ -80,13 +92,19 @@ async def remove_from_whitelist(
     db: AsyncSession = Depends(get_db)
 ):
     """Remove symbol from Engine A whitelist (soft delete)"""
-    result = await db.execute(
+    telegram_id = user["id"]
+    result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
+    wl_result = await db.execute(
         select(UserWhitelist)
-        .where(UserWhitelist.profile_id == user["id"])
+        .where(UserWhitelist.profile_id == profile.id)
         .where(UserWhitelist.symbol == symbol.upper())
         .where(UserWhitelist.exchange == exchange)
     )
-    whitelist_item = result.scalar_one_or_none()
+    whitelist_item = wl_result.scalar_one_or_none()
     
     if not whitelist_item:
         raise HTTPException(status_code=404, detail="Symbol not in whitelist")

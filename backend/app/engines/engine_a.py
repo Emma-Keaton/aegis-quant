@@ -24,7 +24,7 @@ from app.config import get_settings
 from app.database import AsyncSessionLocal
 from app.models import Profile, UserWhitelist, Position, TradeLog, Signal, ExecutionAudit
 from app.core.encryption import decrypt_credentials
-from app.engines.kronos_client import KronosClient
+from app.services.kronos_service import get_kronos_client
 from app.engines.risk_validator import RiskValidator
 from app.engines.execution_router import ExecutionRouter
 from app.core.exceptions import EngineError, ExchangeError, InsufficientFundsError, RiskLimitExceededError

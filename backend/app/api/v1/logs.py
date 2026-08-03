@@ -1,109 +1,121 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+"""Trade/activity logs — persisted to PostgreSQL."""
+
+import logging
+from datetime import datetime, timezone
+from typing import Optional, List
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import select, desc
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
-import uuid
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
 from app.core.telegram_auth import get_current_user
-from app.models import Profile, TradeLog, OrderSide, OrderStatus, ExecutionType
+from app.database import get_db
+from app.models import Profile, TradeLog, OrderStatus
 
-router = APIRouter(prefix="/logs", tags=["logs"])
+logger = logging.getLogger(__name__)
+router = APIRouter(tags=["logs"])
 
 
-class TradeLogResponse(BaseModel):
+class TradeLogItem(BaseModel):
     id: str
-    symbol: str
-    exchange: str
-    side: str
-    execution_type: str
-    size: float
-    price: float
-    total_value_usd: float
+    type: str
+    pair: str
+    volume: str
     status: str
-    slippage: float
-    commission: float
-    tx_hash: Optional[str]
-    order_id: Optional[str]
-    error_message: Optional[str]
-    executed_at: str
-    
-    class Config:
-        from_attributes = True
+    timestamp: str
+    hash: Optional[str] = None
 
 
 class LogsResponse(BaseModel):
-    logs: List[TradeLogResponse]
-    count: int
+    status: str
+    data: List[TradeLogItem]
 
 
-@router.get("", response_model=LogsResponse)
+@router.get("/api/logs")
 async def get_logs(
-    type: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0,
+    type: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get trade/activity logs"""
     telegram_id = user["id"]
     result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
     profile = result.scalar_one_or_none()
-    
     if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
+        return LogsResponse(status="success", data=[])
     
     query = select(TradeLog).where(TradeLog.profile_id == profile.id)
-    
-    if type:
+    if type and type != "ALL":
         query = query.where(TradeLog.side == type.upper())
+    query = query.order_by(desc(TradeLog.executed_at)).limit(limit)
     
-    query = query.order_by(desc(TradeLog.executed_at)).limit(limit).offset(offset)
-    
-    result = await db.execute(query)
-    logs = result.scalars().all()
+    res = await db.execute(query)
+    logs = res.scalars().all()
     
     return LogsResponse(
-        logs=[TradeLogResponse.model_validate(l) for l in logs],
-        count=len(logs)
+        status="success",
+        data=[
+            TradeLogItem(
+                id=str(l.id),
+                type=l.side.value.upper() if hasattr(l.side, 'value') else str(l.side),
+                pair=l.symbol,
+                volume=f"${float(l.total_value_usd):,.2f}",
+                status=l.status.value if hasattr(l.status, 'value') else str(l.status),
+                timestamp=l.executed_at.isoformat(),
+                hash=l.tx_hash,
+            )
+            for l in logs
+        ],
     )
 
 
-@router.post("", response_model=TradeLogResponse)
-async def add_log(
-    symbol: str,
-    side: str,
-    size: float,
-    price: float,
-    execution_type: str = "paper",
-    status: str = "filled",
-    exchange: str = "bybit",
+@router.post("/api/logs")
+async def post_log(
+    request: dict,
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Manually add a log entry (for testing)"""
     telegram_id = user["id"]
     result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
     profile = result.scalar_one_or_none()
-    
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     
-    log = TradeLog(
-        profile_id=profile.id,
-        symbol=symbol.upper(),
-        exchange=exchange,
-        side=OrderSide(side.lower()),
-        execution_type=ExecutionType(execution_type),
-        size=size,
-        price=price,
-        total_value_usd=size * price,
-        status=OrderStatus(status.lower()),
-    )
-    db.add(log)
-    await db.commit()
-    await db.refresh(log)
+    from fastapi import HTTPException
+    log_type = request.get("type", "BUY")
+    pair = request.get("pair", "N/A")
+    volume = request.get("volume", "$0")
+    status = request.get("status", "Filled")
     
-    return TradeLogResponse.model_validate(log)
+    # Parse volume string to number
+    try:
+        vol_num = float(volume.replace("$", "").replace(",", ""))
+    except (ValueError, TypeError):
+        vol_num = 0
+    
+    log_entry = TradeLog(
+        profile_id=profile.id,
+        symbol=pair,
+        exchange="internal",
+        side=OrderSide.BUY if log_type == "BUY" else OrderSide.SELL,
+        execution_type="paper",
+        size=vol_num,
+        price=vol_num,
+        total_value_usd=vol_num,
+        status=OrderStatus.FILLED if status == "Filled" else OrderStatus.PENDING,
+        tx_hash=f"tx_{log_type.lower()}_{datetime.now(timezone.utc).timestamp()}",
+    )
+    db.add(log_entry)
+    await db.commit()
+    await db.refresh(log_entry)
+    
+    return {"status": "success", "data": TradeLogItem(
+        id=str(log_entry.id),
+        type=log_type,
+        pair=pair,
+        volume=volume,
+        status=status,
+        timestamp=log_entry.executed_at.isoformat(),
+        hash=log_entry.tx_hash,
+    )}

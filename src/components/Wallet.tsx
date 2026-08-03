@@ -1,5 +1,9 @@
 import React, { useState } from "react";
+import { connectEVM } from "../crypto/evmConnector";
+import { connectSolana } from "../crypto/solanaConnector";
 import { Link, Wallet as WalletIcon, Shield, Check, ExternalLink, HelpCircle, Eye, Trash2 } from "lucide-react";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
+import WalletConnectUI from "./WalletConnectUI";
 import { UserState } from "../types";
 
 interface WalletProps {
@@ -51,14 +55,43 @@ export default function Wallet({
     }, 1500);
   };
 
-  const handleSimulateEVMConnect = () => {
+  const handleConnectEVM = async () => {
     setSimulatedConnecting(true);
-    setTimeout(() => {
-      onConnectWallet("ETH", "0x71C7656EC7ab88b098defB751B7401B5f6d8976F");
-      setSimulatedConnecting(false);
+    try {
+      const result = await connectEVM('walletconnect');
+      await onConnectWallet(result.network, result.address);
+      // Persist connection server‑side
+      await fetch('/api/wallet/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ network: result.network, address: result.address, connector: 'walletconnect' })
+      });
       setConnectionSuccess(true);
+    } catch (e) {
+      console.error('EVM connection failed', e);
+    } finally {
+      setSimulatedConnecting(false);
       setTimeout(() => setConnectionSuccess(false), 3000);
-    }, 1500);
+    }
+  };
+
+  const handleConnectSolana = async () => {
+    setSimulatedConnecting(true);
+    try {
+      const result = await connectSolana('phantom');
+      await onConnectWallet(result.network, result.address);
+      await fetch('/api/wallet/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ network: result.network, address: result.address, connector: 'solana' })
+      });
+      setConnectionSuccess(true);
+    } catch (e) {
+      console.error('Solana connection failed', e);
+    } finally {
+      setSimulatedConnecting(false);
+      setTimeout(() => setConnectionSuccess(false), 3000);
+    }
   };
 
   const handleFallbackSubmit = (e: React.FormEvent) => {
@@ -135,6 +168,7 @@ export default function Wallet({
       </div>
 
       {/* Paper Trading Balance Adjuster */}
+      <WalletConnectUI />
       {userState.tradeMode === "PAPER" && (
         <div className="bg-[#1c2023] border border-[#c6ff34]/20 rounded-2xl p-5 space-y-4 animate-fade-in relative overflow-hidden">
           <div className="absolute top-0 right-0 bg-[#c6ff34]/10 text-[#c6ff34] font-mono text-[8px] uppercase tracking-widest font-black px-2 py-1 rounded-bl-lg border-l border-b border-[#c6ff34]/20">
@@ -189,6 +223,12 @@ export default function Wallet({
       )}
 
       {/* Web3 wallet Connection triggers */}
+      {/* Connected Networks Overview */}
+      {userState.walletConnected && (
+        <div className="mt-4 p-3 bg-[#0f1113] border border-[#c6ff34]/20 rounded-lg text-xs text-[#c6ff34]">
+          Connected to {userState.network} network at address {userState.walletAddress.slice(0, 6)}...{userState.walletAddress.slice(-6)}
+        </div>
+      )}
       <div className="space-y-4">
         <div className="space-y-1">
           <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold px-1">Method 1: Telegram & TON Ecosystem</p>
@@ -210,12 +250,27 @@ export default function Wallet({
             <p className="text-xs text-zinc-400">Connect Trust Wallet, MetaMask, or Safepal using multi-chain standard.</p>
             <button
               disabled={simulatedConnecting}
-              onClick={handleSimulateEVMConnect}
+              onClick={handleConnectEVM}
               className="w-full border border-zinc-700 text-white font-bold text-xs py-3.5 px-4 rounded-xl hover:bg-zinc-900 transition-all uppercase tracking-wider flex items-center justify-center gap-2"
             >
               {simulatedConnecting ? "Connecting..." : "CONNECT VIA WALLETCONNECT"}
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Solana Wallet Connection */}
+      <div className="space-y-1">
+        <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold px-1">Method 3: Solana (Phantom, Solflare, Torus)</p>
+        <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-5 space-y-3">
+          <p className="text-xs text-zinc-400">Connect a Solana wallet using the Solana Wallet Adapter (Phantom, Solflare, Torus, etc.).</p>
+          <button
+            disabled={simulatedConnecting}
+            onClick={handleConnectSolana}
+            className="w-full border border-zinc-700 text-white font-bold text-xs py-3.5 px-4 rounded-xl hover:bg-zinc-900 transition-all uppercase tracking-wider flex items-center justify-center gap-2"
+          >
+            CONNECT SOLANA WALLET
+          </button>
         </div>
       </div>
 

@@ -565,6 +565,29 @@ export default function Strategy({
         </div>
       </div>
 
+      {/* Base Trade Amount */}
+      <div className="space-y-3 mt-4">
+        <p className="text-[10px] uppercase tracking-widest text-[#c6ff34] font-black flex items-center gap-1.5 px-1">
+          <span>💰</span> BASE TRADE AMOUNT (USD)
+        </p>
+        <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-5 flex items-center">
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={riskSettings.baseTradeUsd}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              if (!isNaN(val)) {
+                onUpdateSettings({ baseTradeUsd: val });
+              }
+            }}
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 text-center font-bold focus:outline-none focus:border-[#c6ff34]"
+          />
+          <span className="ml-2 text-[#c6ff34] font-bold text-sm">USD</span>
+        </div>
+      </div>
+
       {/* Whitelist Matrix */}
       <div className="space-y-3">
         <p className="text-[10px] uppercase tracking-widest text-[#c6ff34] font-black flex items-center gap-1.5 px-1">

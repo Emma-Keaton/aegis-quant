@@ -1,209 +1,125 @@
-# Aegis Quant
+# Aegis Quant — AI-Powered Crypto Trading Platform
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![React 19](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg)](https://fastapi.tiangolo.com/)
+[![React 19](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
 [![Telegram Mini App](https://img.shields.io/badge/Telegram-Mini_App-26A5E4.svg)](https://core.telegram.org/bots/webapps)
 
 **Aegis Quant** is a production-grade quantitative trading platform delivered as a Telegram Mini App. It combines institutional-grade market analysis, AI-powered forecasting, and secure multi-venue execution — all controlled via a native Telegram interface.
 
 ---
 
-## 🏗 Architecture: Dual-Engine Design
+## 🏗 Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        AEGIS QUANT STACK                         │
+│                    AEGIS QUANT PLATFORM                          │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌──────────────┐    ┌──────────────────────────────────────┐   │
 │  │   FRONTEND   │◄───►│           BACKEND (FastAPI)           │   │
-│  │  React 19 +  │     │  ┌─────────────┐ ┌─────────────┐     │   │
-│  │  Tailwind 4  │     │  │  ENGINE A   │ │  ENGINE B   │     │   │
-│  │  Telegram    │     │  │ Technical   │ │  Social     │     │   │
-│  │  Mini App    │     │  │  Core       │ │  Scout      │     │   │
-│  └──────────────┘     │  │ (Blue-Chip) │ │ (Momentum)  │     │   │
-│                       │  └──────┬──────┘ └──────┬──────┘     │   │
-│                       │         │               │             │   │
-│                       │         └───────┬───────┘             │   │
-│                       │                 ▼                     │   │
-│                       │    ┌───────────────────────┐          │   │
-│                       │    │     KRONOS AI          │          │   │
-│                       │    │  (Render, CPU-only)    │          │   │
-│                       │    │  OHLCV → 30 Monte Carlo │          │   │
-│                       │    │  trajectories + CI     │          │   │
-│                       │    └───────────┬────────────┘          │   │
-│                       │                 │                      │   │
-│                       │    ┌───────────────────────┐          │   │
-│                       │    │  GEMINI FLASH-LITE     │          │   │
-│                       │    │  (3-key rotation)      │          │   │
-│                       │    │  Execution formatting  │          │   │
-│                       │    │  Telegram chat bot     │          │   │
-│                       │    └───────────┬────────────┘          │   │
-│                       │                 │                      │   │
-│                       │    ┌───────────────────────┐          │   │
-│                       │    │  EXECUTION GATEWAY     │          │   │
-│                       │    │  CCXT (Bybit/OKX)      │          │   │
-│                       │    │  Web3.py (EVM)         │          │   │
-│                       │    │  Solana-py (Jupiter)   │          │   │
-│                       │    │  TON Connect (Ston.fi) │          │   │
-│                       │    └───────────────────────┘          │   │
+│  │  React 19 +  │     │  ┌─────────────────────────────┐     │   │
+│  │  Tailwind 4  │     │  │    AEGIS ENGINE (AI)        │     │   │
+│  │  Telegram    │     │  │  ┌─────────┬─────────┬────┐ │     │   │
+│  │  Mini App    │     │  │  │Technical│ Sentiment │ Risk│ │     │   │
+│  └──────────────┘     │  │  │ Analyst │  Analyst  │Anlyst││     │   │
+│                       │  │  └────┬────┴────┬──────┴────┘ │     │   │
+│                       │  │       └─────────┼─────────────┘ │     │   │
+│                       │  │                 ▼               │     │   │
+│                       │  │        ┌──────────────┐         │     │   │
+│                       │  │        │  Portfolio   │         │     │   │
+│                       │  │        │   Manager    │         │     │   │
+│                       │  │        └──────┬───────┘         │     │   │
+│                       │  └───────────────┼─────────────────┘     │   │
+│                       │                 │                        │   │
+│                       │    ┌────────────▼────────────┐           │   │
+│                       │    │     DATA LAYER          │           │   │
+│                       │    │  ┌───────────────────┐  │           │   │
+│                       │    │  │  Kronos (HF Model) │  │           │   │
+│                       │    │  │  Gemini Flash (LLM)│  │           │   │
+│                       │    │  │  CCXT (100+ Exch)  │  │           │   │
+│                       │    │  │  VectorBT (Backtest)│  │           │   │
+│                       │    │  └───────────────────┘  │           │   │
+│                       │    └─────────────────────────┘           │   │
+│                       └──────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## ⚡ Engine A: Technical Core (Blue-Chip Autopilot)
-- **Assets**: User-defined whitelist (BTC, ETH, SOL, TON, etc.) — **CRUD from frontend**
-- **Data**: CCXT Pro WebSocket (ticker, orderbook, trades, funding) + REST fallback
-- **Triggers**: Price >2%/1m, Volume >3x avg, Spread <10bps, Funding flip
-- **Forecast**: Kronos AI (128 candles → 30 Monte Carlo trajectories, 90% CI)
-- **Risk**: Kelly sizing + allocation caps, SL/TP, max concurrent trades
-- **Cycle**: Event-driven (<5s reaction) + 5-min scheduled fallback scan
+## ✨ Features
 
-## 📡 Engine B: Social Scout (Momentum Discovery)
-- **Sources**: Twitter (twscrape multi-account), Reddit (URS), Telegram (Telethon), RSS (Scrapy)
-- **Parsing**: Groq Llama3-70B for ticker extraction from unstructured text
-- **Sentiment**: FinBERT + volume spike detection (3x baseline)
-- **Liquidity**: Jupiter (Solana) + Ston.fi (TON) pool depth audit (>$50k, <5% impact)
-- **Cycle**: 30-minute scans → Kronos validation → execution
+### AI-Powered Trading Engine
+- **Multi-Agent Analysis**: Technical, Sentiment, and Risk analysts using Gemini Flash
+- **Kronos Forecasting**: Local foundation model from Hugging Face for price predictions
+- **Consensus Voting**: Ensemble decision-making with weighted confidence
+- **Real-time Execution**: CCXT integration with 100+ exchanges
 
----
+### Social Intelligence (Engine B)
+- **Twitter/X**: Twikit-based sentiment analysis
+- **RSS Feeds**: CoinTelegraph, Bitcoin Magazine, Decrypt
+- **Telegram**: Channel monitoring via Telethon
+- **On-Chain**: Whale movements via CoinGecko
 
-## 🔐 Security & Key Management
-| Component | Implementation |
-|-----------|----------------|
-| **Auth** | Telegram `initData` HMAC-SHA256 verification → `chat_id` as primary key |
-| **CeFi Keys** | AES-256-GCM encrypted at rest, per-user, per-exchange (Bybit/OKX/Binance) |
-| **User Input** | Keys entered via Wallet page → never in `.env`, never in logs |
-| **Paper/Live** | Complete isolation — separate execution paths, audit trail |
+### Secure Trading
+- **AES-256-GCM Encryption**: API keys encrypted at rest
+- **Session-based Auth**: Telegram initData verification
+- **Risk Circuit Breakers**: Kelly sizing, max allocation, drawdown limits
+- **Paper/Live Isolation**: Complete separation of test and production
 
----
-
-## 🤖 AI Integration
-| Model | Purpose | Free Tier |
-|-------|---------|-----------|
-| **Kronos** | OHLCV trajectory forecasting (30 Monte Carlo paths) | Render CPU-only |
-| **Gemini 2.5 Flash-Lite** | Trade execution formatting, Telegram chat bot, risk explanations | 3 keys × 1,500 req/day, 30 RPM |
-| **Groq Llama3-70B** | Social media ticker/entity extraction | 14,400 req/day |
+### Admin & Management
+- **Admin Dashboard**: Secure shutdown, market refresh, execution logs
+- **Source Management**: Add/remove data sources via API
+- **User Control**: Custom watchlists, risk settings, paper balance
 
 ---
 
-## 🛠 Tech Stack
+## 🚀 Quick Start
 
-| Layer | Technology |
-|-------|------------|
-| **Frontend** | React 19, TypeScript, Tailwind CSS 4, Vite 6, `@twa.js/telegram-web-app` |
-| **Backend** | FastAPI 0.115, Python 3.11+, SQLAlchemy 2.0, asyncpg, Redis |
-| **Database** | Supabase (PostgreSQL 16 + TimescaleDB + pgvector) |
-| **Cache/Queue** | Upstash Redis (Pub/Sub, Celery broker, rate limiting) |
-| **Scheduling** | APScheduler AsyncIO (Engine A/B loops) |
-| **Task Queue** | Celery + Redis (scraping, backtests) |
-| **Exchanges** | CCXT Pro (WS), ccxt (REST) — Bybit, OKX, Binance |
-| **DeFi** | web3.py (EVM), solana-py (Jupiter), TON Connect v2 (Ston.fi) |
-| **AI** | google-generativeai (Gemini), Groq, Kronos (PyTorch CPU) |
-| **Telegram Bot** | python-telegram-bot v21 (webhook mode) |
-| **Monitoring** | Prometheus `/metrics`, structured JSON logs |
+### Prerequisites
+- Python 3.11+
+- Node.js 20+
+- PostgreSQL/Supabase database
+- Telegram Bot Token (from @BotFather)
 
----
-
-## 📊 Database Schema (Supabase + TimescaleDB)
-
-| Table | Purpose | RLS |
-|-------|---------|-----|
-| `profiles` | One per Telegram user (wallet, settings, engine config) | ✅ |
-| `user_credentials` | Encrypted CeFi API keys (Bybit/OKX/Binance) | ✅ |
-| `user_whitelist` | **Engine A symbols — CRUD from frontend** | ✅ |
-| `risk_settings` | SL/TP, allocation, drawdown, concurrent limits | ✅ |
-| `paper_balances` | Paper trading balances per asset | ✅ |
-| `positions` | Open positions (SL/TP/trailing, PnL) | ✅ |
-| `trade_logs` | Unified execution history (paper + live) | ✅ |
-| `signals` | Engine A (Kronos) + Engine B (Social) with forecast data | ✅ |
-| `alert_rules` | User-defined alerts with trigger tracking | ✅ |
-| `execution_audit` | Immutable audit trail (trigger type, confidence, status) | ✅ |
-| `market_ticks` | Raw trades (TimescaleDB hypertable, 7-day retention) | — |
-| `market_candles` | OHLCV (TimescaleDB hypertable, 1-year retention) | — |
-| `social_signals` | Sentiment data (TimescaleDB hypertable, 30-day retention) | — |
-
----
-
-## 🚀 Deployment
-
-| Service | Platform | Config |
-|---------|----------|--------|
-| **Frontend** | Vercel | `VITE_API_URL`, `VITE_WS_URL` |
-| **Backend** | Render Web Service | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
-| **Kronos AI** | Render Web Service | `render.yaml` (CPU-only PyTorch, 512MB, auto-sleep) |
-| **Database** | Supabase | PostgreSQL + TimescaleDB + pgvector |
-| **Cache** | Upstash Redis | Serverless, free tier |
-| **Telegram** | BotFather | Webhook → `/api/v1/telegram/webhook` |
-
----
-
-## 🔧 Local Development
-
+### Backend Setup
 ```bash
-# 1. Clone & install
-git clone https://github.com/yourusername/aegis-quant.git
-cd aegis-quant
-
-# 2. Backend
 cd backend
-python -m venv venv && source venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
-cp .env.example .env  # Fill in your keys
 
-# 3. Database (Supabase or local Docker)
-docker-compose up -d postgres redis
+# Configure environment
+cp .env.example .env
+# Edit .env with your credentials:
+#   TELEGRAM_BOT_TOKEN=xxx
+#   ADMIN_CHAT_ID=your_chat_id
+#   DATABASE_URL=postgresql://...
+#   ENCRYPTION_KEY=your_32_byte_key
 
-# 4. Run migrations (Supabase SQL Editor)
-# Copy-paste supabase/migrations/0001_initial_schema.sql
-# Copy-paste supabase/migrations/0002_seed_data.sql
+# Run migrations
+alembic upgrade head
 
-# 5. Start backend
-uvicorn app.main:app --reload --port 8000
-
-# 6. Frontend (separate terminal)
-cd ../
-npm install && npm run dev
-# Open http://localhost:3000
+# Start server
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
----
+### Frontend Setup
+```bash
+# Install dependencies (may take 5-10 minutes)
+npm install --legacy-peer-deps
 
-## 🔑 Required Environment Variables
+# Build for production
+npm run build
 
-```env
-# Database
-DATABASE_URL=postgresql://postgres:xxx@db.xxx.supabase.co:5432/postgres
-REDIS_URL=rediss://default:xxx@xxx.upstash.io:6379
-
-# Encryption (32-byte base64)
-ENCRYPTION_KEY=<generate: python -c "import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())">
-
-# Telegram
-TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
-TELEGRAM_BOT_USERNAME=aegisquantbot
-APP_URL=https://your-app.vercel.app
-TELEGRAM_WEBHOOK_SECRET=<openssl rand -hex 32>
-
-# Kronos AI (after Render deploy)
-KRONOS_API_URL=https://kronos-ai.onrender.com
-KRONOS_API_KEY=<from Render>
-
-# AI Keys
-GEMINI_API_KEY_1=<aistudio.google.com/apikey>
-GEMINI_API_KEY_2=<aistudio.google.com/apikey>
-GEMINI_API_KEY_3=<aistudio.google.com/apikey>
-GROQ_API_KEY=<console.groq.com/keys>
-
-# Engine A Thresholds
-ENGINE_A_PRICE_CHANGE_THRESHOLD=0.02
-ENGINE_A_VOLUME_SPIKE_THRESHOLD=3.0
-ENGINE_A_SPREAD_BPS_THRESHOLD=10
-ENGINE_A_FUNDING_FLIP_ENABLED=true
-ENGINE_A_MIN_CONFIDENCE=0.70
+# Serve dist/ (or use Vite dev server)
+npm run dev
 ```
+
+### Deploy to Render
+1. **Backend**: Connect repo, set env vars, deploy
+2. **Kronos Service**: Deploy separately (requires GPU/CPU with torch)
+3. **Frontend**: Connect same repo, build command `npm run build`, publish dir `dist`
 
 ---
 
@@ -211,106 +127,159 @@ ENGINE_A_MIN_CONFIDENCE=0.70
 
 ```
 aegis-quant/
-├── backend/                    # FastAPI Backend
+├── backend/                    # FastAPI backend
 │   ├── app/
-│   │   ├── api/v1/            # REST endpoints (state, signals, execute, chat, risk, wallet, whitelist, logs, rules, telegram)
-│   │   ├── core/              # encryption, telegram_auth, exceptions, math_helpers
-│   │   ├── engines/           # engine_a (WS triggers), engine_b (social), kronos_client, risk_validator, execution_router, gemini_client
-│   │   ├── models/            # SQLAlchemy models
-│   │   ├── schemas/           # Pydantic schemas
-│   │   ├── api/websocket.py   # Real-time updates
-│   │   └── main.py            # FastAPI entrypoint
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── .env.example
-│
-├── ai-service/                 # Kronos AI Service (Render)
-│   ├── app/
-│   │   ├── main.py            # /forecast, /health
-│   │   └── model/             # Kronos wrapper (placeholder for shiyu-coder/Kronos)
-│   ├── render.yaml            # Render Blueprint
-│   └── Dockerfile
-│
-├── src/                        # React Frontend
-│   ├── components/            # Dashboard, Intel, Strategy, Wallet, Logs, PnLChart
-│   ├── services/              # api.ts, websocket.ts, telegram.ts
-│   └── hooks/
-│
-├── supabase/
-│   ├── migrations/
-│   │   ├── 0001_initial_schema.sql  # All 13 tables + RLS + TimescaleDB
-│   │   └── 0002_seed_data.sql       # Test user + sample signals
-│   └── README.md
-│
-├── docker-compose.yml          # Local dev stack
-├── PLAN.md                     # Full implementation plan
+│   │   ├── api/v1/            # API routes
+│   │   │   ├── admin.py       # Admin endpoints
+│   │   │   ├── sources.py     # Source management
+│   │   │   ├── state.py       # User state
+│   │   │   └── ...
+│   │   ├── engines/
+│   │   │   ├── aegis_engine.py # Main AI engine
+│   │   │   ├── engine_b.py    # Social scrapers
+│   │   │   ├── gemini_client.py # Gemini LLM
+│   │   │   └── ...
+│   │   ├── services/
+│   │   │   ├── market_service.py # CCXT/CoinGecko
+│   │   │   ├── kronos_service.py # HF model
+│   │   │   └── source_registry.py
+│   │   └── ...
+│   ├── alembic/               # Database migrations
+│   └── requirements.txt
+├── src/                       # React frontend
+│   ├── components/
+│   │   ├── AdminDashboard.tsx
+│   │   ├── Dashboard.tsx
+│   │   ├── Logs.tsx
+│   │   └── ...
+│   ├── crypto/
+│   │   ├── evmConnector.ts    # WalletConnect
+│   │   └── solanaConnector.ts # Phantom/Solflare
+│   └── ...
+├── dist/                      # Built frontend
+├── package.json
+├── docker-compose.yml
 └── README.md
 ```
 
 ---
 
-## 🧪 Testing Checklist
+## 🔧 Configuration
 
-- [ ] Health: `GET /health`
-- [ ] Auth: `GET /api/v1/me` with `X-Telegram-Init-Data`
-- [ ] State: `GET /api/v1/state` → dashboard data
-- [ ] Whitelist CRUD: `GET/POST/DELETE /api/v1/whitelist`
-- [ ] CeFi Keys: `POST/GET/DELETE /api/v1/wallet/cefi-keys` + test connection
-- [ ] Signals: `GET /api/v1/signals?engine=A` / `?engine=B`
-- [ ] Execute: `POST /api/v1/execute` (paper mode)
-- [ ] Chat: `POST /api/v1/chat` → Gemini responses
-- [ ] WebSocket: `ws://localhost:8000/ws/updates?initData=...`
-- [ ] Risk: `GET/PATCH /api/v1/risk` + presets
-- [ ] Backtest: `POST /api/v1/backtest`
-- [ ] Telegram Bot: `/portfolio`, `/signals`, `/risk`, `/panic`, `/help`
+### Required Environment Variables
+```bash
+# Telegram
+TELEGRAM_BOT_TOKEN=your_bot_token
+ADMIN_CHAT_ID=your_telegram_chat_id
+
+# Database
+DATABASE_URL=postgresql://user:pass@host:5432/aegis_quant
+
+# Security
+ENCRYPTION_KEY=your_32_byte_base64_key
+
+# AI Services
+GEMINI_API_KEY_1=your_gemini_key_1
+GEMINI_API_KEY_2=
+GEMINI_API_KEY_3=
+```
+
+### Optional Configuration
+```bash
+# Kronos (optional - uses Hugging Face by default)
+KRONOS_SERVICE_URL=https://your-kronos-service.onrender.com
+
+# Exchange API Keys (stored encrypted in DB)
+# Set via frontend Wallet page
+```
 
 ---
 
-## 📈 Roadmap
+## 🛠 Tech Stack
 
-- [ ] **Engine A**: Full CCXT Pro WS integration (Bybit/OKX)
-- [ ] **Engine B**: twscrape + Telethon + URS scrapers
-- [ ] **Kronos**: Load shiyu-coder/Kronos weights, quantize + JIT compile
-- [ ] **DeFi Execution**: web3.py (1inch), solana-py (Jupiter), TON Connect
-- [ ] **Backtesting**: Qlib Alpha158 + FreqAI + FinRL integration
-- [ ] **Mobile**: Native Telegram WebApp features (haptics, theme sync, biometric)
-- [ ] **Analytics**: Grafana dashboards, Prometheus alerts
+| Layer | Technology |
+|-------|------------|
+| **Frontend** | React 19, TypeScript, Tailwind CSS 4, Vite 6 |
+| **Backend** | FastAPI, Python 3.11+, SQLAlchemy, asyncpg |
+| **Database** | PostgreSQL (Supabase) |
+| **AI/ML** | Gemini Flash, Kronos (Hugging Face), VectorBT |
+| **Trading** | CCXT (100+ exchanges), Telegram Bot API |
+| **Infrastructure** | Docker, Render, GitHub Actions |
+
+---
+
+## 📊 APIs
+
+### Authentication
+```
+POST /api/auth/init        # Login with Telegram initData
+POST /api/auth/refresh     # Refresh session token
+POST /api/auth/logout      # Logout
+GET  /api/auth/me          # Get current user
+```
+
+### Trading
+```
+GET    /api/state              # Get dashboard state
+POST   /api/toggle-agent       # Enable/disable bot
+POST   /api/toggle-mode        # Paper/Live mode
+POST   /api/panic              # Emergency close all
+POST   /api/execute-trade      # Execute trade
+GET    /api/engine/analysis    # Run AI analysis
+```
+
+### Sources (Engine B)
+```
+GET    /api/sources/my          # User's custom sources
+POST   /api/sources/my          # Add source
+GET    /api/sources/admin       # All baseline sources
+POST   /api/sources/admin       # Add baseline (admin only)
+GET    /api/sources/combined    # All sources for scanning
+```
+
+### Backtesting
+```
+POST   /api/backtest/run        # Run backtest
+```
+
+### Admin
+```
+POST   /api/admin/shutdown      # Graceful shutdown
+GET    /api/admin/status        # System status
+POST   /api/admin/refresh       # Refresh market data
+GET    /api/admin/executions    # View executions
+```
+
+---
+
+## 🚨 Deployment Checklist
+
+- [ ] Set `TELEGRAM_BOT_TOKEN` in Render
+- [ ] Set `ADMIN_CHAT_ID` to your Telegram chat ID
+- [ ] Set `DATABASE_URL` to Supabase Postgres
+- [ ] Generate `ENCRYPTION_KEY` with `openssl rand -base64 32`
+- [ ] Add `GEMINI_API_KEY_1` (required for analysis)
+- [ ] Run `alembic upgrade head` after deploy
+- [ ] Test `/api/auth/init` with valid Telegram initData
+- [ ] Configure CORS origins for your domain
+- [ ] Set up HTTPS (required for Telegram Mini App)
+
+---
+
+## 📜 License
+
+MIT License - see LICENSE for details.
 
 ---
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create feature branch: `git checkout -b feature/amazing-feature`
-3. Commit changes: `git commit -m 'Add amazing feature'`
-4. Push to branch: `git push origin feature/amazing-feature`
-5. Open Pull Request
+2. Create a feature branch
+3. Make your changes
+4. Run tests: `cd backend && pytest`
+5. Submit a pull request
 
 ---
 
-## 📄 License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-## ⚠️ Disclaimer
-
-**This software is for research and educational purposes only.** Not financial advice. Trading cryptocurrencies carries substantial risk of loss. The authors are not responsible for any financial losses incurred through use of this software. Always test thoroughly in paper mode before live trading.
-
----
-
-## 🙏 Acknowledgments
-
-- [shiyu-coder/Kronos](https://github.com/shiyu-coder/Kronos) — Autoregressive candlestick forecasting
-- [AI4Finance-Foundation/FinRL](https://github.com/AI4Finance-Foundation/FinRL) — DRL trading frameworks
-- [microsoft/qlib](https://github.com/microsoft/qlib) — Quantitative investment platform
-- [freqtrade/freqtrade](https://github.com/freqtrade/freqtrade) — FreqAI ML pipelines
-- [vladcalin/twscrape](https://github.com/vladcalin/twscrape) — Twitter scraping
-- [Telethon/Telethon](https://github.com/Telethon/Telethon) — Telegram MTProto
-- [ccxt/ccxt](https://github.com/ccxt/ccxt) — Unified exchange API
-- [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) — Telegram Bot API
-
----
-
-**Built with ❤️ for the quant trading community**
+**Built with ❤️ for the crypto trading community**

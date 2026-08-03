@@ -42,6 +42,7 @@ export interface RiskSettings {
   takeProfit: number;
   trailingStop: number;
   whitelist: string[];
+  baseTradeUsd: number;
 }
 
 export interface TransactionLog {
