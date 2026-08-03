@@ -6,7 +6,7 @@
 [![React 19](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
 [![Telegram Mini App](https://img.shields.io/badge/Telegram-Mini_App-26A5E4.svg)](https://core.telegram.org/bots/webapps)
 
-**Aegis Quant** is a production-grade quantitative trading platform delivered as a Telegram Mini App. It combines institutional-grade market analysis, AI-powered forecasting, and secure multi-venue execution — all controlled via a native Telegram interface.
+**Aegis Quant** is a production-grade quantitative trading platform delivered as a Telegram Mini App. It combines multi-agent AI analysis, real-time social sentiment, and secure multi-venue execution — CEX via CCXT and Solana DEX via Jupiter — all controlled via a native Telegram interface.
 
 ---
 
@@ -22,23 +22,25 @@
 │  │  Tailwind 4  │     │  │    AEGIS ENGINE (AI)        │     │   │
 │  │  Telegram    │     │  │  ┌─────────┬─────────┬────┐ │     │   │
 │  │  Mini App    │     │  │  │Technical│ Sentiment │ Risk│ │     │   │
-│  └──────────────┘     │  │  │ Analyst │  Analyst  │Anlyst││     │   │
-│                       │  │  └────┬────┴────┬──────┴────┘ │     │   │
-│                       │  │       └─────────┼─────────────┘ │     │   │
+│  │  + Wagmi     │     │  │  │ Analyst │  Analyst  │Anlyst││     │   │
+│  │  + Rainbow   │     │  │  └────┬────┴────┬──────┴────┘ │     │   │
+│  └──────────────┘     │  │       └─────────┼─────────────┘ │     │   │
 │                       │  │                 ▼               │     │   │
 │                       │  │        ┌──────────────┐         │     │   │
-│                       │  │        │  Portfolio   │         │     │   │
-│                       │  │        │   Manager    │         │     │   │
+│                       │  │        │  Portfolio    │         │     │   │
+│                       │  │        │  Manager      │         │     │   │
 │                       │  │        └──────┬───────┘         │     │   │
 │                       │  └───────────────┼─────────────────┘     │   │
 │                       │                 │                        │   │
 │                       │    ┌────────────▼────────────┐           │   │
 │                       │    │     DATA LAYER          │           │   │
 │                       │    │  ┌───────────────────┐  │           │   │
-│                       │    │  │  Kronos (HF Model) │  │           │   │
-│                       │    │  │  Gemini Flash (LLM)│  │           │   │
-│                       │    │  │  CCXT (100+ Exch)  │  │           │   │
-│                       │    │  │  VectorBT (Backtest)│  │           │   │
+│                       │    │  │  Gemini Flash     │  │           │   │
+│                       │    │  │  (Multi-Agent LLM)│  │           │   │
+│                       │    │  │  CCXT (100+ Exch) │  │           │   │
+│                       │    │  │  Jupiter API      │  │           │   │
+│                       │    │  │  DexScreener      │  │           │   │
+│                       │    │  │  VectorBT         │  │           │   │
 │                       │    │  └───────────────────┘  │           │   │
 │                       │    └─────────────────────────┘           │   │
 │                       └──────────────────────────────────────────┘   │
@@ -50,26 +52,34 @@
 ## ✨ Features
 
 ### AI-Powered Trading Engine
-- **Multi-Agent Analysis**: Technical, Sentiment, and Risk analysts using Gemini Flash
-- **Kronos Forecasting**: Local foundation model from Hugging Face for price predictions
-- **Consensus Voting**: Ensemble decision-making with weighted confidence
-- **Real-time Execution**: CCXT integration with 100+ exchanges
+- **Multi-Agent Analysis**: Gemini Flash-powered Technical, Sentiment, and Risk analysts
+- **Consensus Voting**: Ensemble decision-making with weighted confidence scoring
+- **Hybrid Execution**: CCXT for CEXs + Jupiter API for Solana DEX
+- **Real-time Monitoring**: Engine A (technical) + Engine B (social sentiment)
+
+### Multi-Venue Trading
+| Venue | Technology | Supported Tokens |
+|-------|------------|------------------|
+| **CEX** | CCXT (100+ exchanges) | BTC, ETH, SOL, XRP, AVAX, etc. |
+| **Solana DEX** | Jupiter API + DexScreener | BONK, WIF, PEPE, DOGE, POPCAT, etc. |
+| **EVM Chains** | Wagmi + RainbowKit | Ethereum, BSC, Polygon |
 
 ### Social Intelligence (Engine B)
 - **Twitter/X**: Twikit-based sentiment analysis
-- **RSS Feeds**: CoinTelegraph, Bitcoin Magazine, Decrypt
+- **RSS Feeds**: CoinTelegraph, Bitcoin Magazine, Decrypt, CoinDesk
 - **Telegram**: Channel monitoring via Telethon
-- **On-Chain**: Whale movements via CoinGecko
+- **Reddit**: Subreddit scanning
+- **Custom Sources**: Add any RSS feed, Twitter handle, or Telegram channel
 
 ### Secure Trading
 - **AES-256-GCM Encryption**: API keys encrypted at rest
-- **Session-based Auth**: Telegram initData verification
+- **Session-based Auth**: Telegram initData HMAC verification
 - **Risk Circuit Breakers**: Kelly sizing, max allocation, drawdown limits
-- **Paper/Live Isolation**: Complete separation of test and production
+- **Paper/Live Isolation**: Complete separation with audit trail
 
 ### Admin & Management
 - **Admin Dashboard**: Secure shutdown, market refresh, execution logs
-- **Source Management**: Add/remove data sources via API
+- **Source Management**: Full CRUD for monitoring sources
 - **User Control**: Custom watchlists, risk settings, paper balance
 
 ---
@@ -79,7 +89,7 @@
 ### Prerequisites
 - Python 3.11+
 - Node.js 20+
-- PostgreSQL/Supabase database
+- Supabase PostgreSQL database
 - Telegram Bot Token (from @BotFather)
 
 ### Backend Setup
@@ -91,11 +101,7 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your credentials:
-#   TELEGRAM_BOT_TOKEN=xxx
-#   ADMIN_CHAT_ID=your_chat_id
-#   DATABASE_URL=postgresql://...
-#   ENCRYPTION_KEY=your_32_byte_key
+# Edit .env with your credentials (see Environment Variables below)
 
 # Run migrations
 alembic upgrade head
@@ -106,20 +112,29 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### Frontend Setup
 ```bash
-# Install dependencies (may take 5-10 minutes)
+# Install dependencies
 npm install --legacy-peer-deps
 
 # Build for production
 npm run build
 
-# Serve dist/ (or use Vite dev server)
-npm run dev
+# Serve the built files
+npm start
 ```
 
 ### Deploy to Render
-1. **Backend**: Connect repo, set env vars, deploy
-2. **Kronos Service**: Deploy separately (requires GPU/CPU with torch)
-3. **Frontend**: Connect same repo, build command `npm run build`, publish dir `dist`
+
+**Backend Service:**
+- Connect repo: `Emma-Keaton/aegis-quant`
+- Root Directory: `backend`
+- Build: `pip install -r requirements.txt`
+- Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Env vars: See Configuration section
+
+**Frontend Service:**
+- Connect same repo
+- Build: `npm install --legacy-peer-deps && npm run build`
+- Publish Dir: `dist`
 
 ---
 
@@ -127,38 +142,38 @@ npm run dev
 
 ```
 aegis-quant/
-├── backend/                    # FastAPI backend
+├── backend/                          # FastAPI backend
 │   ├── app/
-│   │   ├── api/v1/            # API routes
-│   │   │   ├── admin.py       # Admin endpoints
-│   │   │   ├── sources.py     # Source management
-│   │   │   ├── state.py       # User state
+│   │   ├── api/v1/                  # API routes (18 modules)
+│   │   │   ├── admin.py            # Admin endpoints
+│   │   │   ├── auth.py             # Telegram auth
+│   │   │   ├── solana.py           # Jupiter/DexScreener
+│   │   │   ├── sources.py          # Source management
 │   │   │   └── ...
-│   │   ├── engines/
-│   │   │   ├── aegis_engine.py # Main AI engine
-│   │   │   ├── engine_b.py    # Social scrapers
-│   │   │   ├── gemini_client.py # Gemini LLM
-│   │   │   └── ...
-│   │   ├── services/
-│   │   │   ├── market_service.py # CCXT/CoinGecko
-│   │   │   ├── kronos_service.py # HF model
-│   │   │   └── source_registry.py
-│   │   └── ...
-│   ├── alembic/               # Database migrations
+│   │   ├── engines/                 # Trading engines
+│   │   │   ├── aegis_engine.py     # Main AI engine
+│   │   │   ├── engine_b.py         # Social scrapers
+│   │   │   └── gemini_client.py    # Gemini Flash
+│   │   ├── services/                # Business logic
+│   │   │   ├── jupiter_client.py   # Jupiter API
+│   │   │   ├── dexscreener_client.py # Token data
+│   │   │   ├── market_service.py   # CCXT integration
+│   │   │   └── kronos_service.py   # HF forecasting
+│   │   └── models/                  # SQLAlchemy models
+│   ├── alembic/                     # Database migrations
 │   └── requirements.txt
-├── src/                       # React frontend
-│   ├── components/
-│   │   ├── AdminDashboard.tsx
-│   │   ├── Dashboard.tsx
-│   │   ├── Logs.tsx
-│   │   └── ...
-│   ├── crypto/
-│   │   ├── evmConnector.ts    # WalletConnect
-│   │   └── solanaConnector.ts # Phantom/Solflare
-│   └── ...
-├── dist/                      # Built frontend
-├── package.json
-├── docker-compose.yml
+├── src/                             # React frontend
+│   ├── components/                  # UI components
+│   │   ├── Wallet.tsx              # Multi-chain wallet
+│   │   ├── Intel.tsx               # Market signals
+│   │   └── AdminDashboard.tsx      # Admin panel
+│   ├── crypto/                      # Wallet connectors
+│   │   ├── evmConnector.ts         # Wagmi/EVM
+│   │   └── solanaConnector.ts      # Phantom/Solflare
+│   └── db/                          # Supabase client
+├── dist/                            # Built frontend
+├── render.yaml                      # Render deployment config
+├── docker-compose.yml               # Local development
 └── README.md
 ```
 
@@ -168,29 +183,39 @@ aegis-quant/
 
 ### Required Environment Variables
 ```bash
-# Telegram
-TELEGRAM_BOT_TOKEN=your_bot_token
-ADMIN_CHAT_ID=your_telegram_chat_id
+# Database (Supabase)
+DATABASE_URL="postgresql://postgres.[REF]:[PASS]@db.[REF].supabase.co:5432/postgres"
+SUPABASE_URL="https://[REF].supabase.co"
+SUPABASE_ANON_KEY="eyJ..."
+SUPABASE_SERVICE_ROLE_KEY="eyJ..."
 
-# Database
-DATABASE_URL=postgresql://user:pass@host:5432/aegis_quant
+# Telegram
+TELEGRAM_BOT_TOKEN="123456:ABC..."
+ADMIN_CHAT_ID=123456789
 
 # Security
-ENCRYPTION_KEY=your_32_byte_base64_key
+ENCRYPTION_KEY="your_32_byte_base64_key"
+SESSION_SECRET="random_string"
 
 # AI Services
-GEMINI_API_KEY_1=your_gemini_key_1
-GEMINI_API_KEY_2=
-GEMINI_API_KEY_3=
+GEMINI_API_KEY_1="AIza..."
+GEMINI_API_KEY_2=""
+GEMINI_API_KEY_3=""
+
+# WalletConnect (for EVM wallets)
+WALLET_CONNECT_PROJECT_ID="your_project_id"
+
+# Solana (optional - defaults to public RPC)
+SOLANA_RPC_URL="https://api.mainnet-beta.solana.com"
 ```
 
-### Optional Configuration
+### Generate Required Keys
 ```bash
-# Kronos (optional - uses Hugging Face by default)
-KRONOS_SERVICE_URL=https://your-kronos-service.onrender.com
+# Encryption key (32 bytes base64)
+openssl rand -base64 32
 
-# Exchange API Keys (stored encrypted in DB)
-# Set via frontend Wallet page
+# Session secret
+openssl rand -hex 32
 ```
 
 ---
@@ -200,15 +225,16 @@ KRONOS_SERVICE_URL=https://your-kronos-service.onrender.com
 | Layer | Technology |
 |-------|------------|
 | **Frontend** | React 19, TypeScript, Tailwind CSS 4, Vite 6 |
+| **Wallet** | Wagmi v2, RainbowKit, @solana/web3.js |
 | **Backend** | FastAPI, Python 3.11+, SQLAlchemy, asyncpg |
 | **Database** | PostgreSQL (Supabase) |
-| **AI/ML** | Gemini Flash, Kronos (Hugging Face), VectorBT |
-| **Trading** | CCXT (100+ exchanges), Telegram Bot API |
-| **Infrastructure** | Docker, Render, GitHub Actions |
+| **AI/ML** | Gemini Flash (LLM), VectorBT (backtesting) |
+| **Trading** | CCXT (CEX), Jupiter API (Solana DEX), DexScreener |
+| **Infrastructure** | Render, Docker, GitHub Actions |
 
 ---
 
-## 📊 APIs
+## 📊 API Endpoints (65+ routes)
 
 ### Authentication
 ```
@@ -218,28 +244,33 @@ POST /api/auth/logout      # Logout
 GET  /api/auth/me          # Get current user
 ```
 
-### Trading
+### Trading (CEX)
 ```
 GET    /api/state              # Get dashboard state
 POST   /api/toggle-agent       # Enable/disable bot
 POST   /api/toggle-mode        # Paper/Live mode
 POST   /api/panic              # Emergency close all
-POST   /api/execute-trade      # Execute trade
-GET    /api/engine/analysis    # Run AI analysis
+POST   /api/execute            # Execute trade
+GET    /api/logs               # Trade history
 ```
 
-### Sources (Engine B)
+### Solana DEX Trading (Jupiter)
 ```
-GET    /api/sources/my          # User's custom sources
-POST   /api/sources/my          # Add source
-GET    /api/sources/admin       # All baseline sources
-POST   /api/sources/admin       # Add baseline (admin only)
-GET    /api/sources/combined    # All sources for scanning
+GET    /api/solana/price/{symbol}      # Get token price
+GET    /api/solana/market/{symbol}     # Market data
+POST   /api/solana/quote               # Get swap quote
+POST   /api/solana/swap                # Get swap transaction
+GET    /api/solana/trending            # Top gaining tokens
+GET    /api/solana/search/{query}      # Token search
 ```
 
-### Backtesting
+### Source Management (Engine B)
 ```
-POST   /api/backtest/run        # Run backtest
+GET    /api/sources/my           # User's custom sources
+POST   /api/sources/my           # Add source
+GET    /api/sources/admin        # All baseline sources (admin)
+POST   /api/sources/admin        # Add baseline (admin only)
+GET    /api/sources/combined     # All sources for scanning
 ```
 
 ### Admin
@@ -250,19 +281,39 @@ POST   /api/admin/refresh       # Refresh market data
 GET    /api/admin/executions    # View executions
 ```
 
+### Backtesting
+```
+POST /backtest              # Run backtest (VectorBT)
+```
+
 ---
 
 ## 🚨 Deployment Checklist
 
-- [ ] Set `TELEGRAM_BOT_TOKEN` in Render
-- [ ] Set `ADMIN_CHAT_ID` to your Telegram chat ID
-- [ ] Set `DATABASE_URL` to Supabase Postgres
-- [ ] Generate `ENCRYPTION_KEY` with `openssl rand -base64 32`
-- [ ] Add `GEMINI_API_KEY_1` (required for analysis)
+- [ ] Create Supabase project at https://supabase.com/dashboard
+- [ ] Get database connection string (pooler recommended)
+- [ ] Create Telegram bot via @BotFather
+- [ ] Get Telegram chat ID via @userinfobot
+- [ ] Generate encryption key: `openssl rand -base64 32`
+- [ ] Get Gemini API key from https://aistudio.google.com/apikey
+- [ ] Get WalletConnect project ID from https://cloud.walletconnect.com
+- [ ] Set all environment variables in Render dashboard
 - [ ] Run `alembic upgrade head` after deploy
-- [ ] Test `/api/auth/init` with valid Telegram initData
-- [ ] Configure CORS origins for your domain
-- [ ] Set up HTTPS (required for Telegram Mini App)
+- [ ] Test `/api/health` endpoint
+- [ ] Test `/api/auth/init` with Telegram initData
+- [ ] Test `/api/solana/price/SOL` endpoint
+
+---
+
+## 📚 Documentation
+
+| Document | Description |
+|----------|-------------|
+| `DEPLOYMENT.md` | Full deployment guide |
+| `SUPABASE_SETUP.md` | Supabase configuration |
+| `SOLANA_INTEGRATION.md` | Solana/Jupiter integration |
+| `ADDING_SOURCES.md` | How to add monitoring sources |
+| `PRE_DEPLOYMENT_CHECKLIST.md` | Pre-deployment verification |
 
 ---
 
@@ -272,14 +323,4 @@ MIT License - see LICENSE for details.
 
 ---
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests: `cd backend && pytest`
-5. Submit a pull request
-
----
-
-**Built with ❤️ for the crypto trading community**
+**Built for the crypto trading community** 🚀
