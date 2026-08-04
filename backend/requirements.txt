@@ -49,3 +49,9 @@ python-multipart>=0.0.7
 solana
 solders
 base58
+
+# VectorBT backtesting
+vectorbt
+dill
+numba>=0.66
+matplotlib
