@@ -2,12 +2,90 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Aegis Quant - Advanced Telegram Mini App for Quant Crypto Trading</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    
+    <!-- Primary Meta Tags -->
+    <title>Aegis Quant — AI-Powered Crypto Trading Platform</title>
+    <meta name="title" content="Aegis Quant — AI-Powered Crypto Trading Platform" />
+    <meta name="description" content="Advanced Telegram Mini App for quantitative crypto trading with TON/EVM wallet integrations, automated execution agents, risk sizing, and Gemini AI analysis." />
+    <meta name="keywords" content="crypto, trading, bot, telegram, ai, gemini, solana, jupiter, ccxt, quant" />
+    <meta name="author" content="Aegis Quant" />
+    <meta name="theme-color" content="#c6ff34" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Aegis Quant" />
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://aegis-quant.app/" />
+    <meta property="og:title" content="Aegis Quant — AI Crypto Trading" />
+    <meta property="og:description" content="AI-powered crypto trading platform with multi-agent analysis, Solana DEX trading, and Telegram integration." />
+    <meta property="og:image" content="/icons/telegram-share.png" />
+    
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://aegis-quant.app/" />
+    <meta name="twitter:title" content="Aegis Quant — AI Crypto Trading" />
+    <meta name="twitter:description" content="AI-powered crypto trading platform with multi-agent analysis, Solana DEX trading, and Telegram integration." />
+    <meta name="twitter:image" content="/icons/telegram-share.png" />
+    
+    <!-- Telegram -->
+    <meta name="telegram:channel" content="@aegisquantbot" />
+    
+    <!-- Preload critical assets -->
+    <link rel="preload" as="image" href="/icons/icon-192x192.png" />
   </head>
   <body>
+    <!-- Loading Screen -->
+    <div id="loading-screen" style="position:fixed;inset:0;background:#09090b;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;transition:opacity 0.5s ease;">
+      <img src="/icons/icon-192x192.png" alt="Aegis Quant" style="width:120px;height:120px;border-radius:24px;margin-bottom:24px;animation:pulse 2s ease-in-out infinite;" />
+      <div style="font-family:system-ui,sans-serif;font-size:18px;font-weight:700;color:#c6ff34;letter-spacing:0.1em;text-transform:uppercase;">AEGIS QUANT</div>
+      <div style="font-family:system-ui,sans-serif;font-size:12px;color:#71717a;margin-top:8px;letter-spacing:0.05em;">Loading Trading Engine...</div>
+      <div style="margin-top:32px;width:200px;height:3px;background:#27272a;border-radius:2px;overflow:hidden;">
+        <div id="loading-bar" style="width:0%;height:100%;background:linear-gradient(90deg,#c6ff34,#06b6d4);transition:width 0.3s ease;"></div>
+      </div>
+    </div>
+    
+    <script>
+      // Loading screen animation
+      let progress = 0;
+      const bar = document.getElementById('loading-bar');
+      const interval = setInterval(() => {
+        progress += Math.random() * 15;
+        if (progress > 90) progress = 90;
+        bar.style.width = progress + '%';
+      }, 200);
+      
+      // Hide loading screen when app is ready
+      window.addEventListener('load', () => {
+        clearInterval(interval);
+        bar.style.width = '100%';
+        setTimeout(() => {
+          const screen = document.getElementById('loading-screen');
+          screen.style.opacity = '0';
+          setTimeout(() => screen.style.display = 'none', 500);
+        }, 800);
+      });
+    </script>
+    
+    <style>
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.05); opacity: 0.8; }
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { background: #09090b; color: #fafafa; font-family: system-ui, -apple-system, sans-serif; }
+    </style>
+    
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
