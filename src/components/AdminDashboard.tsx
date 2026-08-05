@@ -1,15 +1,44 @@
-import React, { useState } from "react";
-import { Shield, ShieldAlert, Zap, RefreshCw, LogOut, Users, Command } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Shield, ShieldAlert, Zap, RefreshCw, LogOut, Activity, TrendingUp, TrendingDown, AlertCircle, Clock } from "lucide-react";
 import { setSessionToken, getSessionToken, clearSession, apiJson } from "../api/client";
 
 interface AdminDashboardProps {
   onLogout: () => void;
 }
 
+interface MetricsData {
+  timestamp: string;
+  trades_today: number;
+  pnl_usd: number;
+  open_positions: number;
+  win_rate_pct: number;
+  errors_total: number;
+  uptime_hours: number;
+}
+
 export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [shutdownConfirmed, setShutdownConfirmed] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState<{ status?: string; message?: string; timestamp?: string }>({});
-  const [agentExecutions, setAgentExecutions] = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<MetricsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"system" | "monitoring">("monitoring");
+
+  const loadMetrics = async () => {
+    try {
+      const res = await apiJson("/admin/metrics");
+      setMetrics(res);
+    } catch (err) {
+      console.error("Failed to load metrics:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadMetrics();
+    const interval = setInterval(loadMetrics, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, []);
 
   const handleShutdown = async () => {
     try {
@@ -19,8 +48,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       });
       alert("Admin shutdown initiated");
     } catch (err) {
-      console.error("Shutdown failed:", err);
-      alert("Shutdown failed - check backend logs");
+      alert("Shutdown failed");
     }
   };
 
@@ -28,25 +56,19 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     try {
       const res = await apiJson("/admin/refresh-market", { method: "POST" });
       setRefreshStatus({ status: res.status, message: res.message, timestamp: res.timestamp });
+      loadMetrics();
     } catch (err) {
-      console.error("Refresh failed:", err);
       setRefreshStatus({ status: "error", message: "Market refresh failed" });
     }
   };
 
-  const loadExecutions = async () => {
-    try {
-      const res = await apiJson("/admin/executions");
-      setAgentExecutions(res.executions || []);
-    } catch (err) {
-      console.error("Load executions failed:", err);
-    }
-  };
-
-  // Load executions on mount
-  useEffect(() => {
-    loadExecutions();
-  }, []);
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <RefreshCw className="w-8 h-8 text-[#c6ff34] animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-24 font-sans" id="admin_dashboard">
@@ -56,108 +78,110 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           <Shield className="w-6 h-6 text-[#c6ff34]" />
           <h2 className="text-xl font-black tracking-wider uppercase text-[#c6ff34]">ADMIN DASHBOARD</h2>
         </div>
-        <button
-          onClick={onLogout}
-          className="flex items-center gap-1.5 text-xs font-bold text-red-400 hover:text-[#c6ff34] transition-all"
-        >
+        <button onClick={onLogout} className="flex items-center gap-1.5 text-xs font-bold text-red-400 hover:text-[#c6ff34] transition-all">
           <LogOut className="w-4 h-4" /> Logout
         </button>
       </div>
 
-      {/* Warning Banner */}
-      <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-start gap-3">
-        <ShieldAlert className="w-5 h-5 text-red-400 flex-shrink-0 animate-pulse" />
-        <div>
-          <p className="font-bold text-sm text-red-400 mb-1">⚠ ADMIN ACCESS GRANTED</p>
-          <p className="text-xs text-zinc-400">This screen contains administrative functions. Proceed with caution.</p>
-        </div>
-      </div>
-
-      {/* Shutdown Control */}
-      <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6 space-y-4">
-        <h3 className="text-sm font-bold text-[#c6ff34] uppercase tracking-wider flex items-center gap-2">
-          <Zap className="w-4 h-4" /> System Shutdown
-        </h3>
-        
-        {shutdownConfirmed ? (
-          <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-4 text-center">
-            <p className="text-red-400 font-bold mb-2">CONFIRMED: SHUTDOWN IN PROGRESS</p>
-            <p className="text-xs text-zinc-400">The backend will terminate shortly. Do not refresh this page.</p>
-          </div>
-        ) : (
-          <button
-            onClick={() => setShutdownConfirmed(true)}
-            className="w-full bg-red-500 text-black font-bold py-3 rounded-xl hover:bg-red-400 active:scale-[0.98] transition-all uppercase tracking-wider flex items-center justify-center gap-2"
-          >
-            <Zap className="w-4 h-4" /> Initiate Graceful Shutdown
-          </button>
-        )}
-      </div>
-
-      {/* Market Data Refresh */}
-      <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6 space-y-4">
-        <h3 className="text-sm font-bold text-[#c6ff34] uppercase tracking-wider flex items-center gap-2">
-          <RefreshCw className="w-4 h-4 animate-spin" /> Market Data Refresh
-        </h3>
-        <button onClick={handleRefresh} className="w-full bg-[#c6ff34] text-black font-bold py-3 rounded-xl hover:brightness-110 active:scale-[0.98] transition-all uppercase tracking-wider">
-          Trigger Market Refresh
+      {/* Tabs */}
+      <div className="flex gap-2 border-b border-zinc-800 px-1">
+        <button
+          onClick={() => setActiveTab("monitoring")}
+          className={`px-4 py-2 font-bold text-sm uppercase tracking-wider transition-all ${
+            activeTab === "monitoring" ? "text-[#c6ff34] border-b-2 border-[#c6ff34]" : "text-zinc-400 hover:text-white"
+          }`}
+        >
+          <Activity className="w-4 h-4 inline mr-2" />Monitoring
         </button>
-        
-        {refreshStatus.status && (
-          <div className={`mt-3 p-3 rounded-lg text-sm ${
-            refreshStatus.status === 'success' 
-              ? 'bg-green-500/10 border border-green-500/30 text-green-400' 
-              : 'bg-red-500/10 border border-red-500/30 text-red-400'
-          }`}>
-            <p>{refreshStatus.message}</p>
-            {refreshStatus.timestamp && (
-              <p className="text-xs mt-1 opacity-75">{new Date(refreshStatus.timestamp).toLocaleTimeString()}</p>
-            )}
-          </div>
-        )}
+        <button
+          onClick={() => setActiveTab("system")}
+          className={`px-4 py-2 font-bold text-sm uppercase tracking-wider transition-all ${
+            activeTab === "system" ? "text-[#c6ff34] border-b-2 border-[#c6ff34]" : "text-zinc-400 hover:text-white"
+          }`}
+        >
+          <Zap className="w-4 h-4 inline mr-2" />System
+        </button>
       </div>
 
-      {/* Agent Executions */}
-      <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6 space-y-4">
-        <h3 className="text-sm font-bold text-[#c6ff34] uppercase tracking-wider flex items-center gap-2">
-          <Users className="w-4 h-4" /> Agent Executions
-        </h3>
-        <p className="text-xs text-zinc-500">Recent trade executions from trading agents</p>
-        
-        {agentExecutions.length === 0 ? (
-          <div className="border-dashed border-zinc-700 rounded-lg p-6 text-center text-zinc-500 text-sm">
-            No agent executions recorded yet
-          </div>
-        ) : (
-          <div className="overflow-hidden rounded-lg border border-zinc-800">
-            <table className="w-full text-sm">
-              <thead className="bg-zinc-800/50">
-                <tr>
-                  <th className="px-4 py-2 text-left text-[#c6ff34]">Symbol</th>
-                  <th className="px-4 py-2 text-left text-[#c6ff34]" />
-                  <th className="px-4 py-2 text-left text-[#c6ff34]" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800">
-                {agentExecutions.map((exec, idx) => (
-                  <tr key={idx} className="hover:bg-zinc-800/20">
-                    <td className="px-4 py-3 text-white">{exec.symbol || "-"}</td>
-                    <td className="px-4 py-3 text-zinc-400">{exec.size || "-"}</td>
-                    <td className="px-4 py-3 text-zinc-400">{exec.timestamp || "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {/* Monitoring Tab */}
+      {activeTab === "monitoring" && (
+        <div className="space-y-6">
+          {/* Key Metrics Cards */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Activity className="w-5 h-5 text-[#c6ff34]" />
+                <span className="text-xs font-bold text-zinc-400 uppercase">Trades Today</span>
+              </div>
+              <p className="text-3xl font-black text-white">{metrics?.trades_today || 0}</p>
+            </div>
+            
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                {metrics?.pnl_usd >= 0 ? <TrendingUp className="w-5 h-5 text-green-400" /> : <TrendingDown className="w-5 h-5 text-red-400" />}
+                <span className="text-xs font-bold text-zinc-400 uppercase">PnL Today</span>
+              </div>
+              <p className={`text-3xl font-black ${metrics?.pnl_usd >= 0 ? "text-green-400" : "text-red-400"}`}>
+                ${metrics?.pnl_usd?.toFixed(2) || 0}
+              </p>
+            </div>
 
-      {/* Session Info */}
-      <div className="border-t border-zinc-800 pt-4">
-        <p className="text-xs text-zinc-500 font-mono">
-          Admin session active • Chat ID protected • All actions logged
-        </p>
-      </div>
-    </div>
-  );
-}
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Shield className="w-5 h-5 text-blue-400" />
+                <span className="text-xs font-bold text-zinc-400 uppercase">Open Positions</span>
+              </div>
+              <p className="text-3xl font-black text-white">{metrics?.open_positions || 0}</p>
+            </div>
+
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle className="w-5 h-5 text-yellow-400" />
+                <span className="text-xs font-bold text-zinc-400 uppercase">Errors (24h)</span>
+              </div>
+              <p className="text-3xl font-black text-white">{metrics?.errors_total || 0}</p>
+            </div>
+          </div>
+
+          {/* Win Rate & Uptime */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <TrendingUp className="w-5 h-5 text-[#c6ff34]" />
+                <span className="text-xs font-bold text-zinc-400 uppercase">Win Rate</span>
+              </div>
+              <p className="text-3xl font-black text-[#c6ff34]">{metrics?.win_rate_pct || 0}%</p>
+            </div>
+
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Clock className="w-5 h-5 text-purple-400" />
+                <span className="text-xs font-bold text-zinc-400 uppercase">Uptime</span>
+              </div>
+              <p className="text-3xl font-black text-white">{metrics?.uptime_hours ? `${(metrics.uptime_hours / 24).toFixed(1)}d` : "N/A"}</p>
+            </div>
+          </div>
+
+          {/* Grafana Link */}
+          <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
+            <h3 className="text-sm font-bold text-[#c6ff34] uppercase tracking-wider mb-4">📊 Grafana Cloud</h3>
+            <p className="text-xs text-zinc-400 mb-4">
+              View full dashboards, alerts, and historical metrics in Grafana Cloud.
+            </p>
+            <a
+              href="https://grafana.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-[#c6ff34] text-black font-bold rounded-xl hover:bg-[#b0f020] transition-all text-sm"
+            >
+              <Activity className="w-4 h-4" />
+              Open Grafana Dashboards
+            </a>
+          </div>
+
+          {/* Prometheus Endpoint */}
+          <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
+            <h3 className="text-sm font-bold text-zinc-300 uppercase tracking-wider mb-2">📈 Prometheus Endpoint</h3>
+            <p className="text-xs text-zinc-500 mb-3">Raw metrics for scraping:</p>
+            <code className="block bg-black/50 p-3 rounded-lg text-xs text-[#c6ff34] font-mono">
+     

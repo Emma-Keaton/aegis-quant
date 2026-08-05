@@ -25,6 +25,7 @@ from app.core.exceptions import (
     KronosError, GeminiError, EngineError,
 )
 from app.middleware.rate_limit import rate_limiter
+from app.middleware.metrics import metrics_middleware
 from app.api.v1.auth import router as auth_router
 from app.api.v1.state import router as state_router
 from app.api.v1.signals import router as signals_router
@@ -132,7 +133,7 @@ def create_app() -> FastAPI:
     )
     
     # Rate limiting
-    app.middleware("http")(rate_limiter)
+    app.add_middleware(metrics_middleware)
     
     # Trusted host + security headers (basic Helmet equivalent)
     if not settings.DEBUG:
@@ -210,8 +211,15 @@ def create_app() -> FastAPI:
     from app.api.v1.admin import router as admin_router
     app.include_router(admin_router)
     app.include_router(sources_router)  # Source management
+    # Metrics API
+    from app.api.v1.metrics import router as metrics_router
+    app.include_router(metrics_router)
 
     # WebSocket
+    # Prometheus metrics
+    from app.metrics import get_metrics_endpoint, initialize
+    app.get("/metrics")(get_metrics_endpoint())
+    initialize()
     app.include_router(ws_router)
     
     # ── SPA serving ───────────────────────────────────────────────
