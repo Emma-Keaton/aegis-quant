@@ -24,7 +24,7 @@ from app.models import Profile
 from app.services.kronos_service import get_kronos_client
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/backtest", tags=["backtest"])
+router = APIRouter(prefix="/api/backtest", tags=["backtest"])
 
 
 class BacktestRequest(BaseModel):

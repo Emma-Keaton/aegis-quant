@@ -7,17 +7,15 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.core.telegram_auth import get_current_user
 from app.database import get_db
-from app.models import Profile, UserCredential, Position, TradeLog, RiskSettings as RS, PaperBalance, OrderSide, OrderStatus, TradeMode
+from app.models import Profile, UserCredential, Position, TradeLog, RiskSettings as RS, PaperBalance, OrderSide, OrderStatus, TradeMode, UserWhitelist
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["state"])
-settings = get_settings()
 
 
 # ── Pydantic schemas ──────────────────────────────────────────────
@@ -104,7 +102,9 @@ async def _fetch_naira_rate() -> float:
 
 async def _map_positions(profile_id, db: AsyncSession) -> List[PositionItem]:
     result = await db.execute(
-        select(Position).where(Position.profile_id == profile_id)
+        select(Position)
+        .where(Position.profile_id == profile_id)
+        .where(Position.is_closed == False)
     )
     positions = result.scalars().all()
     items = []
@@ -145,19 +145,20 @@ async def _map_cefi_keys(profile_id, db: AsyncSession) -> dict:
             "okx": ceFi.get("okx", {"connected": False, "encryptedKeys": None})}
 
 
+async def _map_whitelist(profile_id, db: AsyncSession) -> List[str]:
+    result = await db.execute(
+        select(UserWhitelist.symbol)
+        .where(UserWhitelist.profile_id == profile_id)
+        .where(UserWhitelist.active == True)
+    )
+    return [row[0] for row in result.all()]
+
+
 async def _map_risk_settings(profile, db: AsyncSession) -> RiskSettingsOut:
     rr = await db.execute(select(RS).where(RS.profile_id == profile.id))
     rs = rr.scalar_one_or_none()
+    whitelist = await _map_whitelist(profile.id, db)
     if rs:
-        wl = await db.execute(
-            select(text("DISTINCT symbol")).execution_options(
-                literal_binds=True
-            ).from_statement(
-                text("SELECT symbol FROM user_whitelist WHERE profile_id = :pid AND active = TRUE")
-            ),
-            {"pid": profile.id}
-        )
-        # fallback: use profile defaults
         return RiskSettingsOut(
             maxAllocation=float(rs.max_allocation_pct),
             maxConcurrentTrades=rs.max_concurrent_trades,
@@ -166,7 +167,7 @@ async def _map_risk_settings(profile, db: AsyncSession) -> RiskSettingsOut:
             takeProfit=float(rs.take_profit_pct),
             trailingStop=float(rs.trailing_stop_pct),
             baseTradeUsd=float(rs.base_trade_usd),
-            whitelist=[],
+            whitelist=whitelist,
         )
     return RiskSettingsOut(
         maxAllocation=float(profile.max_allocation_pct),
@@ -176,7 +177,7 @@ async def _map_risk_settings(profile, db: AsyncSession) -> RiskSettingsOut:
         takeProfit=6.0,
         trailingStop=1.0,
         baseTradeUsd=10.0,
-        whitelist=[],
+        whitelist=whitelist,
     )
 
 
@@ -365,32 +366,51 @@ async def update_risk_profile(
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     
-    # Update core risk settings fields
-    for field in ("maxAllocation", "maxConcurrentTrades", "riskLevel", "stopLoss", "takeProfit", "trailingStop"):
-        if field in request:
-            setattr(profile, f"max_allocation_pct" if field == "maxAllocation" else
-                          f"max_concurrent_trades" if field == "maxConcurrentTrades" else
-                          f"risk_level" if field == "riskLevel" else None,
-                      request[field])
+    # Core risk fields live on the profile
+    if "maxAllocation" in request:
+        profile.max_allocation_pct = Decimal(str(request["maxAllocation"]))
+    if "maxConcurrentTrades" in request:
+        profile.max_concurrent_trades = int(request["maxConcurrentTrades"])
+    if "riskLevel" in request:
+        profile.risk_level = request["riskLevel"]
 
-    # Update base trade USD if provided
+    # SL/TP/trailing/base trade live on risk_settings
+    risk_fields = {}
+    if "stopLoss" in request:
+        risk_fields["stop_loss_pct"] = Decimal(str(request["stopLoss"]))
+    if "takeProfit" in request:
+        risk_fields["take_profit_pct"] = Decimal(str(request["takeProfit"]))
+    if "trailingStop" in request:
+        risk_fields["trailing_stop_pct"] = Decimal(str(request["trailingStop"]))
     if "baseTradeUsd" in request:
+        risk_fields["base_trade_usd"] = Decimal(str(request["baseTradeUsd"]))
+
+    if risk_fields:
         rs_res = await db.execute(select(RS).where(RS.profile_id == profile.id))
         rs = rs_res.scalar_one_or_none()
         if rs:
-            rs.base_trade_usd = request["baseTradeUsd"]
+            for k, v in risk_fields.items():
+                setattr(rs, k, v)
         else:
-            rs = RS(profile_id=profile.id, base_trade_usd=request["baseTradeUsd"])
+            defaults = dict(
+                stop_loss_pct=Decimal("3.0"),
+                take_profit_pct=Decimal("6.0"),
+                trailing_stop_pct=Decimal("1.0"),
+                max_allocation_pct=profile.max_allocation_pct,
+                max_concurrent_trades=profile.max_concurrent_trades,
+            )
+            defaults.update(risk_fields)
+            rs = RS(profile_id=profile.id, **defaults)
             db.add(rs)
 
     await db.commit()
     return {"status": "success", "data": {
         "maxAllocation": float(profile.max_allocation_pct),
         "maxConcurrentTrades": profile.max_concurrent_trades,
-        "riskLevel": profile.risk_level,
-        "stopLoss": 3.0,
-        "takeProfit": 6.5,
-        "trailingStop": 1.0,
+        "riskLevel": profile.risk_level.value if hasattr(profile.risk_level, 'value') else str(profile.risk_level),
+        "stopLoss": float(risk_fields.get("stop_loss_pct", 3.0)),
+        "takeProfit": float(risk_fields.get("take_profit_pct", 6.5)),
+        "trailingStop": float(risk_fields.get("trailing_stop_pct", 1.0)),
     }}
 
 
@@ -409,7 +429,7 @@ async def panic_close(
     pos_result = await db.execute(select(Position).where(Position.profile_id == profile.id))
     positions = pos_result.scalars().all()
     for p in positions:
-        p.close()  # soft close
+        p.is_closed = True
     profile.bot_enabled = False
     await db.commit()
     
@@ -537,7 +557,8 @@ async def get_risk_profile(
     
     rr = await db.execute(select(RS).where(RS.profile_id == profile.id))
     rs = rr.scalar_one_or_none()
-    
+    whitelist = await _map_whitelist(profile.id, db)
+
     return {"status": "success", "data": {
         "maxAllocation": float(profile.max_allocation_pct),
         "maxConcurrentTrades": profile.max_concurrent_trades,
@@ -545,7 +566,7 @@ async def get_risk_profile(
         "stopLoss": float(rs.stop_loss_pct) if rs else 3.0,
         "takeProfit": float(rs.take_profit_pct) if rs else 6.0,
         "trailingStop": float(rs.trailing_stop_pct) if rs else 1.0,
-        "whitelist": [],
+        "whitelist": whitelist,
     }}
 
 

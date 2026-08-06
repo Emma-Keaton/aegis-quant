@@ -1,12 +1,13 @@
 """Telegram bot handler — processes /start and other commands for Aegis Quant.
 
-Bot integrates with Mini App by generating the tg_initData query parameter
-that Mini Apps receive when launched from Telegram.
+The bot launches the Mini App via a Telegram WebApp inline keyboard button
+(t.me/<bot_username>/app), which passes a signed initData to the frontend.
 """
 
 import asyncio
 import logging
 import html
+import json
 from typing import Optional, Dict, Any
 
 from fastapi import HTTPException
@@ -35,28 +36,42 @@ class BotCommandResponse(BaseModel):
     text: str
 
 
+def _webapp_url() -> str:
+    """Frontend URL that the WebApp button launches."""
+    return settings.APP_URL.rstrip("/")
+
+
+def _webapp_keyboard() -> dict:
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "🚀 Launch Aegis Quant",
+                    "web_app": {"url": _webapp_url()},
+                }
+            ]
+        ]
+    }
+
+
 async def process_user_message(chat_id: int, text: str, user: Dict[str, Any]) -> None:
     """Process incoming user message from Telegram webhook."""
     logger.info(f"[Bot] Message from chat={chat_id}, user={user.get('username')}, text={text[:50]}...")
 
     if text.startswith("/start"):
-        # Handle /start command — extract pass-through parameter if present
-        parts = text.split()
-        if len(parts) > 1:
-            pass_through = parts[1].strip()
-            if pass_through:
-                # Decode base64 pass-through (Telegram Mini App can encode tg_initData)
-                await send_message(chat_id, f"/start received: {pass_through}")
-            else:
-                await send_message(chat_id, "/start without parameters — welcome to Aegis Quant!")
-        else:
-            await send_message(chat_id, "/start <pass_through> to launch Mini App")
+        welcome = (
+            f"Welcome to Aegis Quant, {user.get('first_name', 'trader')}! 🛡️\n\n"
+            "Your AI-powered crypto trading copilot. Tap the button below to "
+            "open the app and connect your wallet, set risk limits, and "
+            "activate the trading agents."
+        )
+        await send_message(chat_id, welcome, reply_markup=_webapp_keyboard())
         return
 
     if text.startswith("/help"):
         help_text = (
             "Aegis Quant Trading Bot\n"
-            "• /start [tg_initData] — Launch Mini App with auth\n"
+            "• /start — Launch the Mini App\n"
             "• /profile — View your trading profile\n"
             "• /mode paper|live — Set trading mode\n"
             "• /toggle_bot on/off — Enable/disable trading agent\n"
@@ -66,22 +81,44 @@ async def process_user_message(chat_id: int, text: str, user: Dict[str, Any]) ->
         return
 
     if text.startswith("/profile"):
-        # Fetch profile from DB (would need auth linkage in production)
         async with AsyncSessionLocal() as db:
-            # In production, link via Telegram ID
-            telegram_id = chat_id  # Telegram chat_id often equals user ID for private chats
+            telegram_id = chat_id
             result = await db.execute(
-                f"SELECT * FROM profiles WHERE telegram_id = {telegram_id} LIMIT 1"
+                Profile.__table__.select().where(Profile.telegram_id == telegram_id).limit(1)
             )
-            # ... handle profile ...
-        await send_message(chat_id, "Profile information would appear here.")
+            row = result.mappings().first()
+        if row:
+            mode = row.get("trading_mode") or "paper"
+            enabled = bool(row.get("bot_enabled"))
+            await send_message(
+                chat_id,
+                f"📊 Profile\n"
+                f"• Mode: `{mode}`\n"
+                f"• Bot: {'enabled' if enabled else 'disabled'}\n"
+                f"• Risk: `{row.get('risk_level', 'medium')}`",
+            )
+        else:
+            await send_message(
+                chat_id,
+                "No profile found yet. Open the app once via /start to create your profile.",
+                reply_markup=_webapp_keyboard(),
+            )
         return
 
     # Default response
     await send_message(chat_id, "I understand you sent: " + html.escape(text))
 
 
-async def send_message(chat_id: int, text: str) -> None:
+async def process_callback(chat_id: int, data: str, user: Dict[str, Any]) -> None:
+    """Process inline callback button presses (e.g. WebApp inline buttons)."""
+    logger.info(f"[Bot] Callback chat={chat_id}, data={data}")
+    if data == "open_app":
+        await send_message(chat_id, "Opening Aegis Quant…", reply_markup=_webapp_keyboard())
+        return
+    await send_message(chat_id, f"Callback received: {html.escape(data[:100])}")
+
+
+async def send_message(chat_id: int, text: str, reply_markup: Optional[dict] = None) -> None:
     """Send a message to a chat via Telegram Bot API."""
     if not settings.TELEGRAM_BOT_TOKEN:
         logger.warning("TELEGRAM_BOT_TOKEN not set — skipping message send")
@@ -93,44 +130,17 @@ async def send_message(chat_id: int, text: str) -> None:
         "text": text,
         "parse_mode": "Markdown",
     }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
 
     try:
         import httpx
         async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(url, json=payload)
+            resp = await client.post(url, json=payload)
+            if resp.status_code >= 400:
+                logger.warning(f"Telegram sendMessage failed: {resp.status_code} {resp.text[:200]}")
     except Exception as e:
         logger.error(f"Failed to send Telegram message: {e}")
-
-
-async def generate_mini_app_init_data(user_id: int, username: Optional[str] = None) -> str:
-    """
-    Generate a tg_initData query string for launching the Mini App.
-    
-    In production, this should be called from the backend after verifying
-    the user's session, and the Mini App should be launched with:
-    https://t.me/{bot_username}/?start={base64_encoded_init_data}
-    
-    This is a simplified version — actual initData includes HMAC signature
-    which requires the bot token and secret. For Mini App launch, Telegram
-    generates the init data automatically when the user clicks the "Open App"
-    button from the bot.
-    """
-    data = {
-        "user": {
-            "id": user_id,
-            "username": username or "",
-            "first_name": "User",
-            "is_bot": False,
-        },
-        "auth_date": int(timezone.utc.timestamp()),
-        "session_data": "",
-        "web_app_data": "",
-    }
-    # In production, you'd generate the hash using Telegram's auth method
-    # For now, just return a simple query parameter
-    user_str = f"user={json.dumps(data['user'])}"
-    auth_str = f"auth_date={str(data['auth_date'])}"
-    return f"{user_str}&{auth_str}"
 
 
 async def handle_callback_query(callback_query: Dict[str, Any]) -> None:
@@ -138,6 +148,5 @@ async def handle_callback_query(callback_query: Dict[str, Any]) -> None:
     chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
     data = callback_query.get("data", "")
     user = callback_query.get("from", {})
-
     if chat_id:
-        await send_message(chat_id, f"Callback received: {data}")
+        await process_callback(chat_id, data, user)

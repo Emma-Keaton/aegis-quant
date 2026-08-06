@@ -1,37 +1,53 @@
-// Placeholder TypeScript adaptation of the Python trader agent.
-// This module provides a createTrader function that returns an object
-// with a "run" method. The real implementation would invoke an LLM to
-// generate a trading proposal based on an investment plan and market
-// context. For now it simply echoes the input state.
+import { getStrategy } from './index';
+import type { StrategyConfig } from './index';
 
 export interface TraderState {
   company_of_interest: string;
   investment_plan: string;
-  // Additional fields can be added as needed.
+  strategy?: string;
+  market_regime?: string;
 }
 
 export interface TradeProposal {
   recommendation: 'BUY' | 'SELL' | 'HOLD';
   reasoning: string;
+  strategy?: string;
 }
 
 /**
  * Creates a trader instance bound to the supplied language model.
- * In the JavaScript/Node environment the LLM would be accessed via an
- * HTTP API (e.g., OpenAI, Anthropic). This stub returns a static proposal
- * derived from the given state.
+ * Uses the YAML strategy playbooks from src/strategies to shape the
+ * proposal. Real deployments should invoke an LLM via HTTP API; this
+ * implementation applies the matched strategy's scoring guidance.
  */
 export function createTrader(_: unknown) {
   return {
-    /**
-     * Runs the trader logic with the provided state and returns a proposal.
-     */
     run(state: TraderState): TradeProposal {
-      // Simple heuristic placeholder – real logic should call the LLM.
-      const recommendation = state.investment_plan.includes('sell') ? 'SELL' : 'BUY';
-      const reasoning = `Based on the investment plan for ${state.company_of_interest}, the agent recommends ${recommendation}.`;
+      const strategy: StrategyConfig | undefined = state.strategy
+        ? getStrategy(state.strategy)
+        : undefined;
 
-      return { recommendation: recommendation as any, reasoning };
+      const investmentPlan = state.investment_plan.toLowerCase();
+      const planSell = investmentPlan.includes('sell');
+      const planBuy = investmentPlan.includes('buy') || investmentPlan.includes('买入');
+
+      let recommendation: TradeProposal['recommendation'] = 'HOLD';
+      if (planSell) recommendation = 'SELL';
+      else if (planBuy || strategy) recommendation = 'BUY';
+
+      const prefix = strategy
+        ? `Strategy "${strategy.display_name}" (${strategy.name}) applies: ${strategy.description}`
+        : `Based on the investment plan for ${state.company_of_interest}`;
+
+      const guidance = strategy
+        ? ` Requires ${strategy.required_tools.join(', ')}; rules ${strategy.core_rules.join(', ')}.`
+        : '';
+
+      return {
+        recommendation,
+        reasoning: `${prefix}.${guidance} Agent recommends ${recommendation}.`,
+        strategy: strategy?.name,
+      };
     },
   };
 }

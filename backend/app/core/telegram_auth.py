@@ -1,9 +1,14 @@
 from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 import logging
 
 from app.config import get_settings
+from app.database import get_db
+from app.models import UserSession
 
 logger = logging.getLogger(__name__)
 
@@ -68,38 +73,50 @@ async def verify_telegram_init_data(init_data: str, bot_token: str) -> Dict[str,
 
 async def get_current_user(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+    db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """
     FastAPI dependency to get authenticated Telegram user.
     
-    Reads initData from:
-    - Header: X-Telegram-Init-Data
-    - Authorization: Bearer <init_data> (for WebSocket)
+    Supports two auth mechanisms (checked in order):
+    1. Header: X-Telegram-Init-Data — HMAC-verified Telegram Web App initData.
+    2. Authorization: Bearer <session_token> — server-issued session token (see /api/auth/init).
     """
     settings = get_settings()
-    
+
     init_data = request.headers.get("X-Telegram-Init-Data")
-    if not init_data and credentials:
-        init_data = credentials.credentials
-    
-    if not init_data:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing X-Telegram-Init-Data header or Authorization Bearer token"
+    if init_data:
+        verified = await verify_telegram_init_data(init_data, settings.TELEGRAM_BOT_TOKEN)
+        user = verified["user"]
+
+        if not user or "id" not in user:
+            raise HTTPException(status_code=401, detail="Invalid user data in initData")
+
+        request.state.telegram_user = user
+        request.state.init_data = verified
+        request.state.auth_method = "init_data"
+        return user
+
+    if credentials and credentials.credentials:
+        result = await db.execute(
+            select(UserSession)
+            .where(UserSession.token == credentials.credentials)
+            .where(UserSession.expires_at > datetime.now(timezone.utc))
         )
+        sess = result.scalar_one_or_none()
+        if not sess:
+            raise HTTPException(status_code=401, detail="Invalid or expired session token")
 
-    verified = await verify_telegram_init_data(init_data, settings.TELEGRAM_BOT_TOKEN)
-    user = verified["user"]
-    
-    if not user or "id" not in user:
-        raise HTTPException(status_code=401, detail="Invalid user data in initData")
+        user = {"id": sess.telegram_id}
+        request.state.telegram_user = user
+        request.state.auth_method = "session_token"
+        return user
 
-    # Attach to request state for downstream use
-    request.state.telegram_user = user
-    request.state.init_data = verified
-    
-    return user
+    raise HTTPException(
+        status_code=401,
+        detail="Missing X-Telegram-Init-Data header or Authorization Bearer token"
+    )
 
 
 def require_telegram_auth(user: Dict = Depends(get_current_user)) -> Dict:

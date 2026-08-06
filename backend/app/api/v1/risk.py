@@ -8,7 +8,7 @@ from app.database import get_db
 from app.core.telegram_auth import get_current_user
 from app.models import Profile, RiskSettings, TradeMode
 
-router = APIRouter(prefix="/risk", tags=["risk"])
+router = APIRouter(prefix="/api/risk", tags=["risk"])
 
 
 class RiskSettingsUpdate(BaseModel):

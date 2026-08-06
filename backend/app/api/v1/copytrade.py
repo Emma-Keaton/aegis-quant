@@ -12,7 +12,7 @@ from app.core.telegram_auth import get_current_user
 from app.database import get_db
 from app.models import CopyTradeSubscription, Profile, Profile as ProfileType
 
-router = APIRouter(prefix="/copytrade", tags=["copy-trading"])
+router = APIRouter(prefix="/api/copytrade", tags=["copy-trading"])
 
 
 @router.post("/channels/register")

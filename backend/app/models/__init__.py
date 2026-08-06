@@ -41,6 +41,11 @@ class ExecutionType(str, enum.Enum):
     LIVE = "live"
 
 
+def enum_values_callable(enum_cls):
+    """Persist enum *values* (lowercase) instead of member names, matching the DB enums."""
+    return [e.value for e in enum_cls]
+
+
 class Profile(Base):
     """User profile - one per Telegram chat_id"""
     __tablename__ = "profiles"
@@ -53,10 +58,10 @@ class Profile(Base):
     language_code = Column(String(10), nullable=True)
     
     # Trading settings
-    risk_level = Column(SQLEnum(RiskLevel), default=RiskLevel.MEDIUM, nullable=False)
+    risk_level = Column(SQLEnum(RiskLevel, values_callable=enum_values_callable), default=RiskLevel.MEDIUM, nullable=False)
     max_allocation_pct = Column(Numeric(5, 2), default=10.0, nullable=False)
     max_concurrent_trades = Column(Integer, default=3, nullable=False)
-    trade_mode = Column(SQLEnum(TradeMode), default=TradeMode.PAPER, nullable=False)
+    trading_mode = Column(SQLEnum(TradeMode, values_callable=enum_values_callable), default=TradeMode.PAPER, nullable=False)
     bot_enabled = Column(Boolean, default=False, nullable=False)
     
     # Engine A config
@@ -150,7 +155,7 @@ class Position(Base):
     profile_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
     symbol = Column(String(20), nullable=False)
     exchange = Column(String(20), nullable=False)
-    side = Column(SQLEnum(OrderSide), nullable=False)
+    side = Column(SQLEnum(OrderSide, values_callable=enum_values_callable), nullable=False)
     size = Column(Numeric(20, 8), nullable=False)
     entry_price = Column(Numeric(20, 8), nullable=False)
     current_price = Column(Numeric(20, 8), nullable=False)
@@ -159,7 +164,8 @@ class Position(Base):
     take_profit = Column(Numeric(20, 8), nullable=True)
     trailing_stop = Column(Numeric(20, 8), nullable=True)
     leverage = Column(Integer, default=1)
-    mode = Column(SQLEnum(TradeMode), nullable=False)
+    mode = Column(SQLEnum(TradeMode, values_callable=enum_values_callable), nullable=False)
+    is_closed = Column(Boolean, default=False, nullable=False)
     opened_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -176,12 +182,12 @@ class TradeLog(Base):
     profile_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
     symbol = Column(String(20), nullable=False)
     exchange = Column(String(20), nullable=False)
-    side = Column(SQLEnum(OrderSide), nullable=False)
-    execution_type = Column(SQLEnum(ExecutionType), nullable=False)
+    side = Column(SQLEnum(OrderSide, values_callable=enum_values_callable), nullable=False)
+    execution_type = Column(SQLEnum(ExecutionType, values_callable=enum_values_callable), nullable=False)
     size = Column(Numeric(20, 8), nullable=False)
     price = Column(Numeric(20, 8), nullable=False)
     total_value_usd = Column(Numeric(20, 2), nullable=False)
-    status = Column(SQLEnum(OrderStatus), default=OrderStatus.PENDING, nullable=False)
+    status = Column(SQLEnum(OrderStatus, values_callable=enum_values_callable), default=OrderStatus.PENDING, nullable=False)
     slippage = Column(Numeric(6, 4), default=0)
     commission = Column(Numeric(20, 8), default=0)
     tx_hash = Column(Text, nullable=True)
@@ -248,16 +254,16 @@ class ExecutionAudit(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     profile_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
-    mode = Column(SQLEnum(TradeMode), nullable=False)
+    mode = Column(SQLEnum(TradeMode, values_callable=enum_values_callable), nullable=False)
     symbol = Column(String(20), nullable=False)
-    side = Column(SQLEnum(OrderSide), nullable=False)
+    side = Column(SQLEnum(OrderSide, values_callable=enum_values_callable), nullable=False)
     size = Column(Numeric(20, 8), nullable=False)
     price = Column(Numeric(20, 8), nullable=False)
     sl = Column(Numeric(20, 8), nullable=True)
     tp = Column(Numeric(20, 8), nullable=True)
     kronos_confidence = Column(Integer, nullable=True)
     trigger_type = Column(String(30), nullable=False)  # ws_price, ws_volume, ws_spread, ws_funding, scheduled
-    status = Column(SQLEnum(OrderStatus), nullable=False)
+    status = Column(SQLEnum(OrderStatus, values_callable=enum_values_callable), nullable=False)
     tx_hash = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False, index=True)
@@ -280,8 +286,6 @@ class RiskSettings(Base):
     max_daily_drawdown_pct = Column(Numeric(5, 2), default=5.0, nullable=False)
     whitelist_only = Column(Boolean, default=True, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-    
-    profile = relationship("Profile", back_populates="risk_settings")
 
 
 class UserSession(Base):
@@ -309,7 +313,8 @@ class CopyTradeSubscription(Base):
     confidence_threshold = Column(Integer, default=70, nullable=False)
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
     profile = relationship("Profile", back_populates="copytrade_subscriptions")
     
     __table_args__ = (

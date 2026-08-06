@@ -11,7 +11,7 @@ from app.core.telegram_auth import get_current_user
 from app.models import Profile, Position, TradeLog, TradeMode, OrderSide, OrderStatus, ExecutionType, PaperBalance
 from app.metrics import record_trade, record_pnl, update_positions, record_error
 
-router = APIRouter(prefix="/execute", tags=["execution"])
+router = APIRouter(prefix="/api/execute", tags=["execution"])
 
 
 class ExecuteRequest(BaseModel):

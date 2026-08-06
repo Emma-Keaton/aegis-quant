@@ -5,9 +5,8 @@ import Wallet from "./components/Wallet";
 import Strategy from "./components/Strategy";
 import Intel from "./components/Intel";
 import Logs from "./components/Logs";
-import { setSessionToken, getSessionToken, clearSession, apiJson } from "./api/client";
+import { setSessionToken, getSessionToken, clearSession, apiJson, apiFetch, getInitData, getApiBase } from "./api/client";
 import { Home, Wallet as WalletIcon, Sliders, Zap, History, RefreshCw } from "lucide-react";
-import AdminPanel from "./components/AdminPanel";
 
 const DEFAULT_USER_STATE: UserState = {
   walletConnected: false,
@@ -66,10 +65,7 @@ export default function App() {
     const existingToken = getSessionToken();
     if (existingToken) {
       try {
-        const res = await fetch("/api/auth/refresh", {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${existingToken}` }
-        });
+        const res = await apiFetch("/api/auth/refresh", { method: "POST" });
         if (res.ok) {
           const json = await res.json();
           if (json.status === "success") {
@@ -85,24 +81,19 @@ export default function App() {
     }
 
     // No token or stale — send Telegram initData for /auth/init
-    const initUrl = new URL(window.location.href);
-    const initData = initUrl.searchParams.get("tg_initData");
-    
+    const initData = getInitData();
+
     if (!initData) {
-      console.warn("[Auth] No tg_initData found — running in demo mode");
+      console.warn("[Auth] No Telegram initData found — running in demo mode");
       return false;
     }
 
     try {
-      const res = await fetch("/api/auth/init", {
+      const res = await apiFetch("/api/auth/init", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Telegram-Init-Data": initData,
-        },
-        body: JSON.stringify({})
+        body: JSON.stringify({}),
       });
-      
+
       if (res.ok) {
         const json = await res.json();
         if (json.status === "success" && json.session_token) {
@@ -113,7 +104,7 @@ export default function App() {
     } catch (e) {
       console.error("[Auth] init failed:", e);
     }
-    
+
     return false;
   };
 
@@ -152,7 +143,7 @@ export default function App() {
       try {
         const controller = new AbortController();
         const id = setTimeout(() => controller.abort(), 2500);
-        const res = await fetch("/health", { signal: controller.signal, cache: "no-store" });
+        const res = await fetch(`${getApiBase()}/health`, { signal: controller.signal, cache: "no-store" });
         clearTimeout(id);
         setNetworkOffline(!res.ok);
       } catch {
@@ -179,6 +170,17 @@ export default function App() {
   }, [networkOffline]);
 
   // ── On Mount: init session + fetch data ────────────────────────
+
+  useEffect(() => {
+    // Tell Telegram the Mini App is ready and expand to full height.
+    try {
+      const webapp = window.Telegram?.WebApp;
+      webapp?.ready();
+      webapp?.expand();
+      webapp?.setHeaderColor("#171717");
+      webapp?.setBackgroundColor("#171717");
+    } catch {}
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -355,7 +357,7 @@ export default function App() {
               <button 
                 onClick={async () => {
                   try {
-                    const res = await fetch("/health", { cache: "no-store" });
+                    const res = await fetch(`${getApiBase()}/health`, { cache: "no-store" });
                     if (res.ok) {
                       setNetworkOffline(false);
                       fetchState();

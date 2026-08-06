@@ -19,11 +19,10 @@ from app.database import get_db
 from app.models import Profile, Signal
 from app.schemas.signals import SignalResponse, SignalListResponse
 from app.services.kronos_service import get_kronos_client
-import pandas as pd
 import numpy as np
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/signals", tags=["signals"])
+router = APIRouter(prefix="/api/signals", tags=["signals"])
 
 
 def _generate_kronos_signal(ticker: str, confidence: int, analysis: str) -> Dict:
@@ -42,28 +41,20 @@ def _generate_kronos_signal(ticker: str, confidence: int, analysis: str) -> Dict
 
 async def _get_kronos_signals_for_ticker(ticker: str, lookback: int = 200) -> List[Dict]:
     """Generate signals for a ticker using Kronos forecast."""
-    client = KronosClient()
+    client = get_kronos_client()
 
     # Generate mock historical data (in production, fetch from CCXT/Exchange)
     np.random.seed(hash(ticker) % 10000)
     n = lookback + 50
-    timestamps = pd.date_range(end=pd.Timestamp.now(tz=timezone.utc), periods=n, freq='1h')
     base_price = 100 if ticker not in ['WIF', 'BONK'] else 2.0
     returns = np.random.normal(0.0005, 0.02, n)
     prices = base_price * np.cumprod(1 + returns)
-
-    df = pd.DataFrame({
-        'open': prices[:-1],
-        'high': prices[:-1] * (1 + np.random.uniform(0, 0.01, n-1)),
-        'low': prices[:-1] * (1 - np.random.uniform(0, 0.01, n-1)),
-        'close': prices[1:],
-        'volume': np.random.uniform(1000, 10000, n-1),
-    }, index=timestamps)
+    closes = prices[1:].tolist()
 
     try:
-        forecast = client.predict(df=df, lookback=lookback, pred_len=24)
-        if len(forecast.close) > 0:
-            change = (forecast.close[0] - df['close'].iloc[-1]) / df['close'].iloc[-1]
+        result = await client.forecast(closes=closes, horizon=24, samples=30)
+        if result.mean_path:
+            change = (result.mean_path[0] - closes[-1]) / closes[-1]
             confidence = int(max(50, min(95, 70 + abs(change) * 100)))
             direction = "upward" if change > 0 else "downward"
             analysis = f"Kronos forecast: {change*100:.1f}% {direction} momentum" if change > 0 else "Neutral consolidation"

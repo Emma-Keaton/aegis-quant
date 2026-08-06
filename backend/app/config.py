@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 from typing import List, Optional, Dict
 from functools import lru_cache
 
@@ -22,6 +23,9 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
     ENVIRONMENT: str = "development"
+
+    # Process role: "web" (API only), "worker" (engines/telethon), "all" (both)
+    AEGIS_ROLE: str = "all"
 
     # ── Supabase Database ──────────────────────────────────────────────
     # Option 1: Direct connection (better for local/dev)
@@ -52,6 +56,7 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_BOT_USERNAME: str = "aegisquantbot"
     APP_URL: str = "http://localhost:3000"
+    API_PUBLIC_URL: str = ""  # Public API base URL for webhook registration, e.g. https://aegis-api.onrender.com
     ADMIN_CHAT_ID: Optional[int] = None
     TELEGRAM_WEBHOOK_SECRET: str = ""
 
@@ -86,6 +91,20 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["*"]
     SESSION_SECRET: str = ""
     SESSION_TTL_HOURS: int = 720
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
+
+    @field_validator("AEGIS_ROLE", mode="before")
+    @classmethod
+    def _validate_role(cls, v):
+        if v not in ("web", "worker", "all"):
+            raise ValueError(f"AEGIS_ROLE must be one of web|worker|all, got {v!r}")
+        return v
     
     # Rate limiting
     RATE_LIMIT_REQUESTS: int = 60
@@ -115,6 +134,29 @@ def get_settings() -> Settings:
     return Settings()
 
 
+def validate_production_settings() -> None:
+    """Fail fast at startup in production if required secrets are missing."""
+    settings = get_settings()
+    if settings.ENVIRONMENT != "production":
+        return
+    missing = []
+    for field in (
+        "DATABASE_URL",
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SESSION_SECRET",
+        "ENCRYPTION_KEY",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_WEBHOOK_SECRET",
+    ):
+        if not getattr(settings, field):
+            missing.append(field)
+    if missing:
+        raise RuntimeError(
+            "Missing required production settings: " + ", ".join(missing)
+        )
+
+
 def get_database_url() -> str:
     """Get the appropriate database URL with Supabase-specific settings."""
     settings = get_settings()
@@ -133,10 +175,12 @@ def get_database_url() -> str:
     
     # Add Supabase-specific params
     if "supabase" in db_url or "vercel-storage" in db_url:
-        # Ensure SSL is enabled for Supabase
-        if "sslmode" not in db_url:
-            db_url += "?sslmode=require"
-        # Pooler uses port 6543
-        db_url = db_url.replace(":5432/", ":6543/")
+        # Ensure SSL is enabled for Supabase (asyncpg uses `ssl` param)
+        if "ssl" not in db_url:
+            db_url += ("&" if "?" in db_url else "?") + "ssl=require"
+        # Only rewrite to the pooler port for actual pooler hosts
+        # (direct connections use db.<ref>.supabase.co:5432 and do NOT listen on 6543)
+        if "pooler" in db_url and ":5432/" in db_url:
+            db_url = db_url.replace(":5432/", ":6543/")
     
     return db_url

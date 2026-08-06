@@ -1,6 +1,0 @@
-{
-  "name": "Aegis Quant",
-  "description": "Advanced Telegram Mini App for quantitative crypto trading with TON/EVM wallet integrations, automated execution agents, risk sizing, and Kronos AI sentiment analysis.",
-  "requestFramePermissions": [],
-  "majorCapabilities": []
-}

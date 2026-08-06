@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { History, Search, ArrowUpRight, ArrowDownRight, RefreshCw, ExternalLink, Calendar, Filter, ShieldAlert, Shield } from "lucide-react";
 import { TransactionLog } from "../types";
-import { getSessionToken, clearSession } from "../api/client";
+import { apiFetch, clearSession } from "../api/client";
 import AdminDashboard from "./AdminDashboard";
 
 // Helper component for the admin button
-function AdminButton() {
+function AdminButton({ onOpenAdmin }: { onOpenAdmin: () => void }) {
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -13,17 +13,9 @@ function AdminButton() {
   useEffect(() => {
     const checkAdmin = async () => {
       try {
-        const token = getSessionToken();
-        if (token) {
-          // Verify admin status by calling /admin/status with session token
-          const res = await fetch("/admin/status", {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (res.ok) {
-            setIsAdmin(true);
-          } else {
-            setIsAdmin(false);
-          }
+        const res = await apiFetch("/api/admin/status");
+        if (res.ok) {
+          setIsAdmin(true);
         } else {
           setIsAdmin(false);
         }
@@ -57,7 +49,7 @@ function AdminButton() {
   // Admin user sees the green button
   return (
     <button
-      onClick={() => setShowAdminModal(true)}
+      onClick={onOpenAdmin}
       className="bg-[#c6ff34] text-black font-bold text-xs px-3 py-1.5 rounded-xl hover:bg-[#b0f020] transition-all flex items-center gap-1"
     >
       <Shield className="w-3.5 h-3.5" /> Admin
@@ -76,7 +68,7 @@ export default function Logs() {
     if (showLoading) setLoading(true);
     try {
       const url = typeFilter === "ALL" ? "/api/logs" : `/api/logs?type=${typeFilter}`;
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (!res.ok) {
         throw new Error("Failed to load execution logs");
       }
@@ -98,9 +90,8 @@ export default function Logs() {
   const handleSimulateInboundLog = async () => {
     try {
       // Post a new simulated filled buy position to verify state is fully linked
-      const res = await fetch("/api/logs", {
+      const res = await apiFetch("/api/logs", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "BUY",
           pair: "SOL/USDT",
@@ -131,7 +122,7 @@ export default function Logs() {
           >
             + TEST TRADE EVENT
           </button>
-          <AdminButton />
+          <AdminButton onOpenAdmin={() => setShowAdminModal(true)} />
         </div>
       </div>
 

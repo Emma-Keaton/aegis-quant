@@ -18,7 +18,7 @@ from app.metrics import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/admin/metrics", tags=["Admin Metrics"])
+router = APIRouter(prefix="/api/admin/metrics", tags=["Admin Metrics"])
 
 
 class MetricSummary(BaseModel):

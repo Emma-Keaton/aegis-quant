@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import apiFetch from '../api/client';
 
 interface Channel {
   channelId: string;
@@ -16,7 +17,7 @@ export default function CopyTradeManager() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/copytrade/channels');
+      const res = await apiFetch('/api/copytrade/channels');
       const json = await res.json();
       if (json.status === 'success') setChannels(json.data);
       else throw new Error(json.error || 'Failed');
@@ -34,9 +35,8 @@ export default function CopyTradeManager() {
   const handleAdd = async () => {
     if (!newChannelId) return;
     try {
-      const res = await fetch('/api/copytrade/register', {
+      const res = await apiFetch('/api/copytrade/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channelId: newChannelId, confidenceThreshold: newThreshold }),
       });
       const json = await res.json();
@@ -51,9 +51,8 @@ export default function CopyTradeManager() {
 
   const handleUpdate = async (channelId: string, threshold: number) => {
     try {
-      const res = await fetch('/api/copytrade/update', {
+      const res = await apiFetch('/api/copytrade/update', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channelId, confidenceThreshold: threshold }),
       });
       const json = await res.json();
@@ -66,9 +65,8 @@ export default function CopyTradeManager() {
 
   const handleDelete = async (channelId: string) => {
     try {
-      const res = await fetch('/api/copytrade/unregister', {
+      const res = await apiFetch('/api/copytrade/unregister', {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channelId }),
       });
       const json = await res.json();

@@ -27,7 +27,7 @@ from app.services.jupiter_client import (
 from app.services.dexscreener_client import get_dex_client
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/solana", tags=["solana"])
+router = APIRouter(prefix="/api/solana", tags=["solana"])
 
 
 class SolanaQuoteRequest(BaseModel):

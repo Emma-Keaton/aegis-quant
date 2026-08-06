@@ -63,12 +63,13 @@ async def get_current_user_from_token(
 
 
 async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Dependency: extract and validate session token from Authorization header."""
     if not credentials:
         raise HTTPException(status_code=401, detail="Missing authorization header")
-    return await get_current_user_from_token(credentials.credentials, None)  # db injected later
+    return await get_current_user_from_token(credentials.credentials, db)
 
 
 @router.post("/init")

@@ -24,7 +24,8 @@ else:
         "pool_pre_ping": True,
         "echo": settings.DEBUG,
         "connect_args": {
-            "sslmode": "require",  # Required by Supabase
+            "ssl": "require",  # Required by Supabase (asyncpg uses `ssl`, not `sslmode`)
+            "statement_cache_size": 0,  # Required by Supabase transaction pooler (PgBouncer)
         },
     }
 

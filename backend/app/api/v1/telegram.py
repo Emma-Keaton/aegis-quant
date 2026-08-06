@@ -13,7 +13,7 @@ from app.telegram.bot_handler import process_user_message, send_message
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/telegram", tags=["telegram"])
+router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 
 
 class WebhookUpdate(BaseModel):

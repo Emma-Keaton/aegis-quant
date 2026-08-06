@@ -11,7 +11,7 @@ from app.core.telegram_auth import get_current_user
 from app.models import Profile, UserCredential
 from app.core.encryption import encrypt_credentials, decrypt_credentials
 
-router = APIRouter(prefix="/wallet", tags=["wallet"])
+router = APIRouter(prefix="/api/wallet", tags=["wallet"])
 
 
 class WalletConnectRequest(BaseModel):

@@ -11,7 +11,6 @@ If no model can be loaded, falls back to a lightweight placeholder.
 
 import asyncio
 import logging
-import torch
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
@@ -69,6 +68,7 @@ class KronosService:
             
     def _get_available_memory_gb(self) -> float:
         """Estimate available memory in GB."""
+        import torch
         # Check GPU memory
         if torch.cuda.is_available():
             # Total GPU memory
@@ -93,6 +93,7 @@ class KronosService:
     async def _load_best_model(self) -> bool:
         """Load the largest Kronos model that fits in available memory."""
         import sys
+        import torch
         
         # Check if required packages are available
         try:

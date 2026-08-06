@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import asyncio
 
-from app.config import get_settings
+from app.config import get_settings, validate_production_settings
 from app.database import init_db, close_db
 from app.core.exceptions import (
     AegisQuantError, TelegramAuthError, ExchangeError,
@@ -57,18 +57,33 @@ logger = logging.getLogger("aegis")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    logger.info(f"[AEGIS] Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    
+    logger.info(f"[AEGIS] Starting {settings.APP_NAME} v{settings.APP_VERSION} (role={settings.AEGIS_ROLE})")
+
+    validate_production_settings()
+
     await init_db()
     logger.info("[AEGIS] Database initialized")
-    
-    # Start background engines
-    try:
-        from app.engines.engine_scheduler import start_engines
-        await start_engines()
-        logger.info("[AEGIS] Trading engines started")
-    except Exception as e:
-        logger.warning(f"[AEGIS] Engine startup skipped: {e}")
+
+    is_worker = settings.AEGIS_ROLE == "worker"
+    is_web = settings.AEGIS_ROLE == "web"
+
+    if not is_worker:
+        # Register Telegram bot commands + webhook (web/all roles)
+        try:
+            from app.telegram.registration import register_bot
+            await register_bot()
+            logger.info("[AEGIS] Telegram bot registered")
+        except Exception as e:
+            logger.warning(f"[AEGIS] Telegram bot registration skipped: {e}")
+
+    if not is_web:
+        # Start background engines (worker/all roles)
+        try:
+            from app.engines.engine_scheduler import start_engines
+            await start_engines()
+            logger.info("[AEGIS] Trading engines started")
+        except Exception as e:
+            logger.warning(f"[AEGIS] Engine startup skipped: {e}")
 
     # Start market data feed (default symbol list, 5‑second interval)
     try:
@@ -133,7 +148,7 @@ def create_app() -> FastAPI:
     )
     
     # Rate limiting
-    app.add_middleware(metrics_middleware)
+    app.middleware("http")(metrics_middleware)
     
     # Trusted host + security headers (basic Helmet equivalent)
     if not settings.DEBUG:

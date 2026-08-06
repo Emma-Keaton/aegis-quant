@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import CopyTradeManager from "./CopyTradeManager";
 import { Zap, RefreshCw, Radio, Sparkles, MessageSquare, Flame } from "lucide-react";
 import { MarketSignal } from "../types";
+import apiFetch from "../api/client";
 
 interface IntelProps {
   onActivateAgent: (ticker: string, size: number) => void;
@@ -27,7 +28,7 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
     if (showLoading) setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/signals");
+      const res = await apiFetch("/api/signals");
       if (!res.ok) {
         throw new Error("Failed to fetch market signals");
       }

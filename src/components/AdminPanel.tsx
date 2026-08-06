@@ -1,14 +1,4 @@
-"""Admin panel for QuantDinger integration.
-
-Provides:
-- List of agent tokens (via `/quantdinger-admin/tokens`).
-- Button to refresh market data.
-- Button to kill the entire backend (admin only).
-
-All requests include the `X‑Telegram‑Init‑Data` header automatically via the
-`apiJson` helper which reads `window.Telegram.WebApp.initData` from the page
-URL (the same mechanism used for normal auth).
-"""
+// Admin panel for QuantDinger integration.
 
 import React, { useEffect, useState } from "react";
 import { XCircle, RefreshCw, Zap } from "lucide-react";

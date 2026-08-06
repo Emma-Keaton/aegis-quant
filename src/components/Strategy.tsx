@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Sliders, ShieldCheck, CheckSquare, Square, AlertOctagon, HelpCircle, Trash2, Plus, DollarSign, Coins, Play, RefreshCw, BarChart2, Bell, Zap, Sparkles } from "lucide-react";
 import { RiskSettings, AlertRule } from "../types";
+import apiFetch from "../api/client";
+import StrategyPlaybook from "./StrategyPlaybook";
 
 interface StrategyProps {
   riskSettings: RiskSettings;
@@ -93,7 +95,7 @@ export default function Strategy({
   // Fetch alert rules on mount
   const fetchRules = async () => {
     try {
-      const res = await fetch("/api/rules");
+      const res = await apiFetch("/api/rules");
       if (res.ok) {
         const json = await res.json();
         if (json.status === "success" && json.data) {
@@ -130,9 +132,8 @@ export default function Strategy({
     const finalBench = backtestBench === "CUSTOM" ? customBench : backtestBench;
 
     try {
-      const res = await fetch("/api/backtest", {
+      const res = await apiFetch("/api/backtest", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           range: finalRange,
           initialCapital: backtestCap,
@@ -177,9 +178,8 @@ export default function Strategy({
     setRuleSubmitting(true);
 
     try {
-      const res = await fetch("/api/rules", {
+      const res = await apiFetch("/api/rules", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           metric: ruleMetric,
           condition: ruleCondition,
@@ -205,9 +205,8 @@ export default function Strategy({
   const handleToggleRule = async (id: string) => {
     if (networkOffline) return;
     try {
-      const res = await fetch("/api/rules/toggle", {
+      const res = await apiFetch("/api/rules/toggle", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id })
       });
       if (res.ok) {
@@ -224,9 +223,8 @@ export default function Strategy({
   const handleDeleteRule = async (id: string) => {
     if (networkOffline) return;
     try {
-      const res = await fetch("/api/rules/delete", {
+      const res = await apiFetch("/api/rules/delete", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id })
       });
       if (res.ok) {
@@ -335,6 +333,8 @@ export default function Strategy({
           <span>↺</span> RESET TO DEFAULTS
         </button>
       </div>
+
+      <StrategyPlaybook />
 
       {/* Trading Execution Mode */}
       <div className="space-y-3">

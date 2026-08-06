@@ -98,7 +98,7 @@
 - Node.js 20+
 - Supabase PostgreSQL database
 - Telegram Bot Token (from @BotFather)
-- Grafana Cloud account (free tier)
+- WalletConnect Cloud project ID (for EVM wallet connect)
 
 ### Backend Setup
 ```bash
@@ -111,38 +111,75 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your credentials
 
-# Run migrations
-alembic upgrade head
-
-# Start server
+# Apply schema (via Supabase — see Deployment below), then start API
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Frontend Setup
 ```bash
 # Install dependencies
-npm install --legacy-peer-deps
+npm install
 
-# Build for production
+# Copy frontend env
+cp .env.example .env.local
+# Set VITE_API_URL=http://localhost:8000 and VITE_WALLET_CONNECT_PROJECT_ID
+
+# Development server
+npm run dev
+
+# Production build
 npm run build
-
-# Serve the built files
-npm start
 ```
 
-### Deploy to Render
+---
 
-**Backend Service:**
-- Connect repo: `Emma-Keaton/aegis-quant`
-- Root Directory: `backend`
+## ☁️ Deployment
+
+### 1. Supabase (Postgres)
+1. Create a project at [supabase.com](https://supabase.com).
+2. Install the Supabase CLI and link it: `supabase link --project-ref <REF>`.
+3. Apply the schema migration: `supabase db push`.
+   - The canonical schema lives in `supabase/migrations/20260806120000_aegis_init.sql`
+     (15 tables, 5 enums, triggers, seed data).
+4. From **Project Settings → Database**, copy the connection string (direct or pooler)
+   for `DATABASE_URL`, plus `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY`.
+
+### 2. Render — Backend API (`aegis-quant-api`, type `web`)
+- Root directory: `backend`
 - Build: `pip install -r requirements.txt`
 - Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Env vars: See Configuration section below
+- Health check: `/health`
+- `AEGIS_ROLE=web` — on boot it registers the Telegram webhook + bot commands.
+- Set all required secrets from `backend/.env.example` (DATABASE_URL, SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, ENCRYPTION_KEY, ...).
+- `API_PUBLIC_URL` is set automatically from `RENDER_EXTERNAL_URL` (see `render.yaml`).
 
-**Frontend Service:**
-- Connect same repo
-- Build: `npm install --legacy-peer-deps && npm run build`
-- Publish Dir: `dist`
+### 3. Render — Worker (`aegis-quant-worker`, type `worker`)
+- Root directory: `backend`
+- Build: `pip install -r requirements.txt`
+- Start: `python worker.py`
+- `AEGIS_ROLE=worker` — starts the trading engines (A/B), Telethon channel polling,
+  and market feed; only the web service handles webhooks.
+
+### 4. Vercel — Frontend
+- Framework: Vite. Build: `npm run build`, output `dist/`.
+- Set env vars: `VITE_API_URL=https://<your-api>.onrender.com`,
+  `VITE_WALLET_CONNECT_PROJECT_ID=...`.
+- `vercel.json` provides the SPA rewrite so Telegram Mini App routes work.
+
+### 5. Telegram
+- Create the bot with @BotFather; set the bot username in `TELEGRAM_BOT_USERNAME`.
+- Webhook registration is automatic: the API calls `setWebhook` to
+  `{API_PUBLIC_URL}/api/telegram/webhook` with a `secret_token` on startup.
+- Open the bot and press **Start** — the `/start` command launches the Mini App
+  (`APP_URL`) via a WebApp button.
+
+### Auth & Security
+- The Mini App authenticates via Telegram `initData` (HMAC-verified server-side);
+  a server-side session token is then issued (`/api/auth/init`).
+- All `/api/*` requests send `X-Telegram-Init-Data` + `Authorization: Bearer <session>`.
+- Secrets are validated at startup when `ENVIRONMENT=production` — the process fails
+  fast if any required key is missing.
 
 ---
 
@@ -152,41 +189,39 @@ npm start
 aegis-quant/
 ├── backend/                          # FastAPI backend
 │   ├── app/
-│   │   ├── api/v1/                  # API routes (18 modules)
+│   │   ├── api/v1/                  # API routes
 │   │   │   ├── admin.py            # Admin endpoints
-│   │   │   ├── auth.py             # Telegram auth
+│   │   │   ├── auth.py             # Telegram auth / init
 │   │   │   ├── solana.py           # Jupiter/DexScreener
-│   │   │   ├── metrics.py          # Admin metrics API
+│   │   │   ├── telegram.py         # Webhook handler
 │   │   │   └── ...
 │   │   ├── engines/                 # Trading engines
-│   │   │   ├── aegis_engine.py     # Main AI engine
-│   │   │   ├── engine_b.py         # Social scrapers
-│   │   │   └── gemini_client.py    # Gemini Flash
-│   │   ├── metrics/                 # Prometheus metrics
-│   │   │   ├── __init__.py         # Registry + /metrics
-│   │   │   └── trading.py          # Trade metrics
+│   │   │   ├── engine_a.py         # Technical + Kronos
+│   │   │   ├── engine_b.py         # Social sentiment
+│   │   │   └── engine_scheduler.py # Loop scheduler
+│   │   ├── core/                    # Auth, security, config
+│   │   ├── models/                  # SQLAlchemy models
 │   │   ├── services/                # Business logic
-│   │   │   ├── jupiter_client.py   # Jupiter API
-│   │   │   ├── dexscreener_client.py # Token data
-│   │   │   └── market_service.py   # CCXT integration
-│   │   ├── agents/                  # Trading agents
-│   │   │   └── trading_agents.py   # Multi-agent framework
-│   │   └── strategies/              # Trading strategies
-│   │       └── freqtrade_adapter.py # 4 strategies
-│   ├── alembic/                     # Database migrations
+│   │   ├── telegram/                # Bot handlers + webhook registration
+│   │   └── strategies/              # Freqtrade adapter
+│   ├── worker.py                    # Worker entrypoint (engines/telethon)
 │   └── requirements.txt
+├── supabase/migrations/             # Canonical Postgres schema (SQL)
 ├── src/                             # React frontend
 │   ├── components/                  # UI components
-│   │   ├── AdminDashboard.tsx      # Admin panel + monitoring
-│   │   ├── Wallet.tsx              # Multi-chain wallet
-│   │   └── Intel.tsx               # Market signals
+│   │   ├── AdminDashboard.tsx
+│   │   ├── StrategyPlaybook.tsx     # YAML strategy library
+│   │   ├── Wallet.tsx               # Multi-chain wallet
+│   │   └── Intel.tsx                # Market signals
+│   ├── strategies/                  # YAML trading strategy playbooks
+│   │   ├── index.ts                 # Strategy loader
+│   │   ├── trader.ts                # Strategy-driven trader
+│   │   └── *.yaml                   # Playbooks (bull_trend, etc.)
 │   ├── crypto/                      # Wallet connectors
 │   │   ├── evmConnector.ts         # Wagmi/EVM
 │   │   └── solanaConnector.ts      # Phantom/Solflare
-│   └── db/                          # Supabase client
+│   └── api/client.ts                # API client (initData + session auth)
 ├── public/                          # Static assets
-│   ├── icons/                       # App icons
-│   ├── favicon.ico                  # Favicon
-│   └── manifest.json                # PWA manifest
-├── dist/                            # Built frontend
-├── render.yaml 
+├── render.yaml                      # Render API + worker config
+├── vercel.json                      # Vercel SPA rewrite
+└── backend/.env.example             # Backend env template

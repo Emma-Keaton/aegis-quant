@@ -8,14 +8,10 @@ python-dotenv
 # Database
 sqlalchemy
 asyncpg
-alembic
 psycopg2-binary
 
 # Redis
 redis
-
-# Telegram
-python-telegram-bot
 
 # Exchanges
 ccxt
@@ -24,9 +20,6 @@ google-generativeai
 
 # Scheduling
 apscheduler
-
-# Task Queue
-celery
 
 # Crypto
 cryptography
@@ -37,9 +30,13 @@ httpx
 # PyTorch CPU (for Kronos client)
 torch --index-url https://download.pytorch.org/whl/cpu
 transformers
-bitsandbytes
 pandas
 numpy
+
+# Social scraping (Engine B)
+feedparser
+telethon
+twikit
 
 # Utilities
 orjson
@@ -49,12 +46,6 @@ python-multipart>=0.0.7
 solana
 solders
 base58
-
-# VectorBT backtesting
-vectorbt
-dill
-numba>=0.66
-matplotlib
 
 # Monitoring
 prometheus-client

@@ -60,12 +60,6 @@ export default function Wallet({
     try {
       const result = await connectEVM('walletconnect');
       await onConnectWallet(result.network, result.address);
-      // Persist connection server‑side
-      await fetch('/api/wallet/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ network: result.network, address: result.address, connector: 'walletconnect' })
-      });
       setConnectionSuccess(true);
     } catch (e) {
       console.error('EVM connection failed', e);
@@ -78,13 +72,8 @@ export default function Wallet({
   const handleConnectSolana = async () => {
     setSimulatedConnecting(true);
     try {
-      const result = await connectSolana('phantom');
+      const result = await connectSolana();
       await onConnectWallet(result.network, result.address);
-      await fetch('/api/wallet/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ network: result.network, address: result.address, connector: 'solana' })
-      });
       setConnectionSuccess(true);
     } catch (e) {
       console.error('Solana connection failed', e);

@@ -62,7 +62,7 @@ class ExecutionRouter:
             "passphrase": cred.encrypted_passphrase
         })
         
-        import ccxt
+        import ccxt.async_support as ccxt
         exchange_class = getattr(ccxt, exchange)
         client = exchange_class({
             'apiKey': decrypted["api_key"],
@@ -115,7 +115,7 @@ class ExecutionRouter:
         """Simulate paper trade execution"""
         # In paper mode, just return success
         # Real price would come from CCXT fetch_ticker
-        import ccxt
+        import ccxt.async_support as ccxt
         ex = ccxt.bybit({'enableRateLimit': True})
         try:
             ticker = await ex.fetch_ticker(symbol)

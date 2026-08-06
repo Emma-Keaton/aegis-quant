@@ -10,6 +10,7 @@ Architecture:
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass
@@ -174,7 +175,7 @@ class EngineA:
     def __init__(self):
         self.settings = get_settings()
         self.ws_manager = CCXTWebSocketManager()
-        self.kronos = KronosClient()
+        self.kronos = get_kronos_client()
         self.risk_validator = RiskValidator()
         self.execution_router = ExecutionRouter()
         self.active_symbols: Dict[str, Dict] = {}  # user_id -> {symbol: config}
@@ -275,13 +276,15 @@ class EngineA:
                 return
             
             # 2. Call Kronos for forecast
-            forecast = await self.kronos.forecast(candles)
+            closes = [c["close"] for c in candles]
+            forecast = await self.kronos.forecast(closes=closes, horizon=30, samples=30)
             if not forecast:
                 return
             
-            confidence = forecast.get("confidence", 0)
-            if confidence < profile.engine_a_min_confidence:
-                logger.info(f"Confidence {confidence} below threshold {profile.engine_a_min_confidence}")
+            confidence = forecast.confidence
+            min_conf = float(profile.engine_a_min_confidence or 0.70) * 100
+            if confidence < min_conf:
+                logger.info(f"Confidence {confidence} below threshold {min_conf}")
                 return
             
             # 3. Risk validation
@@ -305,7 +308,7 @@ class EngineA:
                 price=event.current_price,
                 stop_loss=risk_check.stop_loss,
                 take_profit=risk_check.take_profit,
-                mode=profile.trading_mode
+                mode=profile.trading_mode.value
             )
             
             # 5. Log execution audit
@@ -346,7 +349,7 @@ class EngineA:
                 price=Decimal(str(execution.get("price", 0))),
                 sl=Decimal(str(execution.get("stop_loss", 0))) if execution.get("stop_loss") else None,
                 tp=Decimal(str(execution.get("take_profit", 0))) if execution.get("take_profit") else None,
-                kronos_confidence=forecast.get("confidence"),
+                kronos_confidence=forecast.confidence,
                 trigger_type=event.trigger_type,
                 status=execution.get("status", "filled"),
                 tx_hash=execution.get("tx_hash"),

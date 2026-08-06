@@ -24,7 +24,7 @@ from app.engines.engine_scheduler import stop_engines
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(AdminGuard.verify_admin)])
+router = APIRouter(prefix="/api/admin", tags=["Admin"], dependencies=[Depends(AdminGuard.verify_admin)])
 
 
 class ShutdownRequest(BaseModel):

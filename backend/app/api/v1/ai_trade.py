@@ -12,7 +12,7 @@ import httpx
 
 from app.config import get_settings
 
-router = APIRouter(prefix="/ai-trade", tags=["AI Trade"])
+router = APIRouter(prefix="/api/ai-trade", tags=["AI Trade"])
 
 # Simple pass‑through model – accept any JSON object
 from pydantic import RootModel, ConfigDict

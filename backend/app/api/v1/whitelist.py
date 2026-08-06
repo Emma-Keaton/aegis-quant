@@ -8,7 +8,7 @@ from app.core.telegram_auth import get_current_user
 from app.models import Profile, UserWhitelist
 from app.schemas.whitelist import WhitelistAdd, WhitelistResponse
 
-router = APIRouter(prefix="/whitelist", tags=["whitelist"])
+router = APIRouter(prefix="/api/whitelist", tags=["whitelist"])
 
 
 @router.get("", response_model=List[WhitelistResponse])
