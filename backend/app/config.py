@@ -1,7 +1,9 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
-from typing import List, Optional, Dict
+import json as _json
+from typing import Annotated, List, Optional, Dict
 from functools import lru_cache
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -88,16 +90,33 @@ class Settings(BaseSettings):
     ENGINE_A_MIN_CONFIDENCE: float = 0.70
 
     # Security
-    CORS_ORIGINS: List[str] = ["*"]
+    # NoDecode prevents pydantic-settings from JSON-decoding this list field
+    # from env (Render sets a plain comma string); the before-validator handles
+    # both comma-separated and JSON-array formats.
+    CORS_ORIGINS: Annotated[List[str], NoDecode] = ["*"]
     SESSION_SECRET: str = ""
     SESSION_TTL_HOURS: int = 720
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def _parse_cors_origins(cls, v):
+        if v is None:
+            return ["*"]
         if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return ["*"]
+            if v.startswith("["):
+                try:
+                    parsed = _json.loads(v)
+                    if isinstance(parsed, list):
+                        return [str(o).strip() for o in parsed]
+                except _json.JSONDecodeError:
+                    pass
             return [o.strip() for o in v.split(",") if o.strip()]
-        return v
+        if isinstance(v, (list, tuple, set)):
+            return [str(o).strip() for o in v]
+        return [str(v).strip()]
 
     @field_validator("AEGIS_ROLE", mode="before")
     @classmethod
