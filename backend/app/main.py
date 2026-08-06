@@ -70,11 +70,19 @@ async def lifespan(app: FastAPI):
     if not is_worker:
         # Register Telegram bot commands + webhook (web/all roles)
         try:
-            from app.telegram.registration import register_bot
+            from app.telegram.registration import register_bot, start_webhook_keepalive
             await register_bot()
             logger.info("[AEGIS] Telegram bot registered")
         except Exception as e:
             logger.warning(f"[AEGIS] Telegram bot registration skipped: {e}")
+
+        # Self-healing async re-registration (Render URL changes / free-tier spin-ups)
+        try:
+            from app.telegram.registration import start_webhook_keepalive
+            start_webhook_keepalive()
+            logger.info("[AEGIS] Telegram webhook keepalive started")
+        except Exception as e:
+            logger.warning(f"[AEGIS] Telegram webhook keepalive start failed: {e}")
 
     if not is_web:
         # Start background engines (worker/all roles)
@@ -116,6 +124,14 @@ async def lifespan(app: FastAPI):
         from app.services.market_hub import stop_market_feed
         await stop_market_feed()
         logger.info("[AEGIS] Market feed stopped")
+    except Exception:
+        pass
+
+    # Stop Telegram webhook keepalive
+    try:
+        from app.telegram.registration import stop_webhook_keepalive
+        stop_webhook_keepalive()
+        logger.info("[AEGIS] Telegram webhook keepalive stopped")
     except Exception:
         pass
 

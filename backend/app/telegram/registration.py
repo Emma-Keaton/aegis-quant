@@ -3,7 +3,9 @@
 Called at API startup (web role) or manually via `python -m app.telegram.registration`.
 """
 
+import asyncio
 import logging
+from typing import Optional
 
 import httpx
 
@@ -68,6 +70,43 @@ async def register_bot() -> None:
         await register_webhook()
     except Exception as e:
         logger.error(f"register_webhook failed: {e}")
+
+
+_KEEPALIVE_INTERVAL_SECONDS = 3600  # re-register webhook every hour
+_keepalive_task: Optional["asyncio.Task"] = None
+
+
+async def _keepalive_loop() -> None:
+    """Periodically re-register bot commands + webhook.
+
+    This makes the bot self-heal on Render, where the public URL can change
+    (preview deploys get ephemeral onrender.com URLs, free-tier services get
+    spun down/up) and where Telegram may be briefly unreachable at boot.
+    """
+    while True:
+        await asyncio.sleep(_KEEPALIVE_INTERVAL_SECONDS)
+        try:
+            await register_bot_commands()
+            await register_webhook()
+            logger.info("Telegram webhook keepalive: commands + webhook re-registered")
+        except Exception as e:
+            logger.warning(f"Telegram webhook keepalive pass failed: {e}")
+
+
+def start_webhook_keepalive() -> None:
+    """Start the background keepalive task (idempotent)."""
+    global _keepalive_task
+    if _keepalive_task and not _keepalive_task.done():
+        return
+    _keepalive_task = asyncio.create_task(_keepalive_loop())
+
+
+def stop_webhook_keepalive() -> None:
+    """Cancel the background keepalive task."""
+    global _keepalive_task
+    if _keepalive_task and not _keepalive_task.done():
+        _keepalive_task.cancel()
+        _keepalive_task = None
 
 
 async def _main() -> None:
