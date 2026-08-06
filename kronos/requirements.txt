@@ -1,0 +1,11 @@
+# Kronos forecasting service (deployed separately on Render: aegis-quant-kronos)
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+
+# Forecasting / ML (optional — only needed when KRONOS_LOAD_MODEL=1)
+numpy
+pandas
+# torch --index-url https://download.pytorch.org/whl/cpu
+# transformers

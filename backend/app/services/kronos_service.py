@@ -171,19 +171,55 @@ class KronosService:
         return False
         
     async def forecast(self, closes: List[float], horizon: int = 30, samples: int = 30) -> ForecastResult:
-        """Generate price trajectory forecast using Kronos model."""
+        """Generate price trajectory forecast using Kronos model.
+
+        If a remote Kronos service is configured (`KRONOS_SERVICE_URL`), requests
+        are proxied there first; on any failure we fall back to the in-process
+        (local model / placeholder) path so forecasting never hard-fails.
+        """
         if len(closes) < 16:
             raise ValueError(f"Insufficient data: need at least 16 candles, got {len(closes)}")
-            
+
+        # Prefer the dedicated remote Kronos service when configured
+        if settings.KRONOS_SERVICE_URL:
+            try:
+                return await self._remote_forecast(closes, horizon, samples)
+            except Exception as e:
+                logger.warning(f"Remote Kronos ({settings.KRONOS_SERVICE_URL}) unavailable: {e}; falling back to local")
+
         # If no model loaded, use placeholder
         if not self.model_loaded or self.predictor is None:
             return self._placeholder_forecast(closes, horizon, samples)
-            
+
         try:
             return await self._model_forecast(closes, horizon, samples)
         except Exception as e:
             logger.error(f"Kronos forecast failed: {e}, using placeholder")
             return self._placeholder_forecast(closes, horizon, samples)
+
+    async def _remote_forecast(self, closes: List[float], horizon: int, samples: int) -> ForecastResult:
+        """Proxy a forecast request to the standalone Kronos service."""
+        import httpx
+
+        url = f"{settings.KRONOS_SERVICE_URL.rstrip('/')}/forecast"
+        headers = {}
+        if settings.KRONOS_API_KEY:
+            headers["X-API-Key"] = settings.KRONOS_API_KEY
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                url,
+                json={"closes": closes, "horizon": horizon, "samples": samples},
+                headers=headers,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        return ForecastResult(
+            trajectories=data.get("trajectories", []),
+            mean_path=data.get("mean_path", []),
+            confidence_90=data.get("confidence_90", []),
+            confidence=data.get("confidence", 50),
+            metadata=data.get("metadata", {"model_source": "remote"}),
+        )
             
     async def _model_forecast(self, closes: List[float], horizon: int, samples: int) -> ForecastResult:
         """Run inference using Kronos model."""

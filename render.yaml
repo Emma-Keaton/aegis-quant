@@ -58,6 +58,13 @@ services:
         value: https://api.mainnet-beta.solana.com
       - key: WALLET_CONNECT_PROJECT_ID
         sync: false
+      - key: KRONOS_SERVICE_URL
+        fromService:
+          name: aegis-quant-kronos
+          type: web
+          envVarName: RENDER_EXTERNAL_URL
+      - key: KRONOS_API_KEY
+        sync: false
 
   # ── Worker (engines + channel polling) ───────────────────────────
   - type: worker
@@ -102,3 +109,25 @@ services:
         sync: false
       - key: REDIS_URL
         sync: false
+
+  # ── Kronos (AI forecasting, deployed separately) ─────────────────
+  - type: web
+    name: aegis-quant-kronos
+    env: python
+    region: oregon
+    plan: starter
+    buildCommand: cd kronos && pip install -r requirements.txt
+    startCommand: cd kronos && uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: ENVIRONMENT
+        value: production
+      # Set KRONOS_LOAD_MODEL=1 and add the Kronos lib + torch to
+      # kronos/requirements.txt to enable real model inference (needs GPU).
+      - key: KRONOS_LOAD_MODEL
+        value: "0"
+      - key: KRONOS_API_KEY
+        sync: false
+
