@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Shield, ShieldAlert, Zap, RefreshCw, LogOut, Activity, TrendingUp, TrendingDown, AlertCircle, Clock } from "lucide-react";
-import { setSessionToken, getSessionToken, clearSession, apiJson } from "../api/client";
+import { apiJson } from "../api/client";
 
 interface AdminDashboardProps {
   onLogout: () => void;
@@ -18,10 +18,10 @@ interface MetricsData {
 
 export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [shutdownConfirmed, setShutdownConfirmed] = useState(false);
-  const [refreshStatus, setRefreshStatus] = useState<{ status?: string; message?: string; timestamp?: string }>({});
+  const [refreshStatus, setRefreshStatus] = useState<{ status?: string; message?: string }>({});
   const [metrics, setMetrics] = useState<MetricsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"system" | "monitoring">("monitoring");
+  const [activeTab, setActiveTab] = useState<"monitoring" | "system">("monitoring");
 
   const loadMetrics = async () => {
     try {
@@ -36,7 +36,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
   useEffect(() => {
     loadMetrics();
-    const interval = setInterval(loadMetrics, 30000); // Refresh every 30s
+    const interval = setInterval(loadMetrics, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -55,7 +55,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const handleRefresh = async () => {
     try {
       const res = await apiJson("/admin/refresh-market", { method: "POST" });
-      setRefreshStatus({ status: res.status, message: res.message, timestamp: res.timestamp });
+      setRefreshStatus({ status: res.status, message: res.message });
       loadMetrics();
     } catch (err) {
       setRefreshStatus({ status: "error", message: "Market refresh failed" });
@@ -71,14 +71,14 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   }
 
   return (
-    <div className="space-y-6 pb-24 font-sans" id="admin_dashboard">
+    <div className="space-y-6 pb-24 font-sans">
       {/* Header */}
       <div className="flex justify-between items-center h-16 border-b border-zinc-800 px-1">
         <div className="flex items-center gap-3">
           <Shield className="w-6 h-6 text-[#c6ff34]" />
           <h2 className="text-xl font-black tracking-wider uppercase text-[#c6ff34]">ADMIN DASHBOARD</h2>
         </div>
-        <button onClick={onLogout} className="flex items-center gap-1.5 text-xs font-bold text-red-400 hover:text-[#c6ff34] transition-all">
+        <button onClick={onLogout} className="flex items-center gap-1.5 text-xs font-bold text-red-400 hover:text-[#c6ff34]">
           <LogOut className="w-4 h-4" /> Logout
         </button>
       </div>
@@ -87,7 +87,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       <div className="flex gap-2 border-b border-zinc-800 px-1">
         <button
           onClick={() => setActiveTab("monitoring")}
-          className={`px-4 py-2 font-bold text-sm uppercase tracking-wider transition-all ${
+          className={`px-4 py-2 font-bold text-sm uppercase tracking-wider ${
             activeTab === "monitoring" ? "text-[#c6ff34] border-b-2 border-[#c6ff34]" : "text-zinc-400 hover:text-white"
           }`}
         >
@@ -95,7 +95,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         </button>
         <button
           onClick={() => setActiveTab("system")}
-          className={`px-4 py-2 font-bold text-sm uppercase tracking-wider transition-all ${
+          className={`px-4 py-2 font-bold text-sm uppercase tracking-wider ${
             activeTab === "system" ? "text-[#c6ff34] border-b-2 border-[#c6ff34]" : "text-zinc-400 hover:text-white"
           }`}
         >
@@ -106,7 +106,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       {/* Monitoring Tab */}
       {activeTab === "monitoring" && (
         <div className="space-y-6">
-          {/* Key Metrics Cards */}
+          {/* Metrics Grid */}
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
               <div className="flex items-center gap-2 mb-2">
@@ -141,10 +141,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               </div>
               <p className="text-3xl font-black text-white">{metrics?.errors_total || 0}</p>
             </div>
-          </div>
 
-          {/* Win Rate & Uptime */}
-          <div className="grid grid-cols-2 gap-4">
             <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
               <div className="flex items-center gap-2 mb-2">
                 <TrendingUp className="w-5 h-5 text-[#c6ff34]" />
@@ -169,7 +166,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               View full dashboards, alerts, and historical metrics in Grafana Cloud.
             </p>
             <a
-              href="https://grafana.com"
+              href="https://grafana.com/products/cloud/"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-4 py-2 bg-[#c6ff34] text-black font-bold rounded-xl hover:bg-[#b0f020] transition-all text-sm"
@@ -183,5 +180,63 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
             <h3 className="text-sm font-bold text-zinc-300 uppercase tracking-wider mb-2">📈 Prometheus Endpoint</h3>
             <p className="text-xs text-zinc-500 mb-3">Raw metrics for scraping:</p>
-            <code className="block bg-black/50 p-3 rounded-lg text-xs text-[#c6ff34] font-mono">
-     
+            <code className="block bg-black/50 p-3 rounded-lg text-xs text-[#c6ff34] font-mono break-all">
+              https://your-backend.onrender.com/metrics
+            </code>
+          </div>
+        </div>
+      )}
+
+      {/* System Tab */}
+      {activeTab === "system" && (
+        <div className="space-y-6">
+          {/* Warning Banner */}
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-red-400 flex-shrink-0 animate-pulse" />
+            <div>
+              <p className="font-bold text-sm text-red-400 mb-1">⚠ ADMIN ACCESS GRANTED</p>
+              <p className="text-xs text-zinc-400">Proceed with caution.</p>
+            </div>
+          </div>
+
+          {/* Shutdown Control */}
+          <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6 space-y-4">
+            <h3 className="text-sm font-bold text-[#c6ff34] uppercase tracking-wider flex items-center gap-2">
+              <Zap className="w-4 h-4" /> System Shutdown
+            </h3>
+            
+            {shutdownConfirmed ? (
+              <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-4 text-center">
+                <p className="text-red-400 font-bold mb-2">CONFIRMED: SHUTDOWN IN PROGRESS</p>
+                <p className="text-xs text-zinc-400">The backend will terminate shortly.</p>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShutdownConfirmed(true)}
+                className="w-full bg-red-500 text-black font-bold py-3 rounded-xl hover:bg-red-400 transition-all uppercase tracking-wider flex items-center justify-center gap-2"
+              >
+                <Zap className="w-4 h-4" /> Initiate Graceful Shutdown
+              </button>
+            )}
+          </div>
+
+          {/* Market Refresh */}
+          <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6 space-y-4">
+            <h3 className="text-sm font-bold text-[#c6ff34] uppercase tracking-wider flex items-center gap-2">
+              <RefreshCw className="w-4 h-4" /> Market Data Refresh
+            </h3>
+            <button
+              onClick={handleRefresh}
+              className="w-full bg-[#1c2023] border border-[#c6ff34]/30 text-[#c6ff34] font-bold py-3 rounded-xl hover:bg-[#c6ff34]/10 transition-all uppercase tracking-wider flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" /> Refresh Market Data
+            </button>
+            {refreshStatus.message && (
+              <p className="text-xs text-zinc-400 text-center">{refreshStatus.message}</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
