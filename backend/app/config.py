@@ -65,7 +65,6 @@ class Settings(BaseSettings):
     # AI Services
     KRONOS_SERVICE_URL: str = ""
     KRONOS_API_URL: str = "https://kronos-ai.onrender.com"
-    KRONOS_API_KEY: str = ""
     
     GEMINI_API_KEY_1: str = ""
     GEMINI_API_KEY_2: str = ""

@@ -63,7 +63,6 @@ services:
           name: aegis-quant-kronos
           type: web
           envVarName: RENDER_EXTERNAL_URL
-      - key: KRONOS_API_KEY
         sync: false
 
   # ── Worker (engines + channel polling) ───────────────────────────
@@ -128,6 +127,5 @@ services:
       # kronos/requirements.txt to enable real model inference (needs GPU).
       - key: KRONOS_LOAD_MODEL
         value: "0"
-      - key: KRONOS_API_KEY
         sync: false
 

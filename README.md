@@ -225,3 +225,57 @@ aegis-quant/
 ├── render.yaml                      # Render API + worker config
 ├── vercel.json                      # Vercel SPA rewrite
 └── backend/.env.example             # Backend env template
+
+---
+
+## 🤖 Deploying Kronos Worker (Optional)
+
+The Kronos AI forecasting service can be deployed as a separate Render Worker for better performance.
+
+### Step 1: Deploy Kronos Worker
+
+1. Go to https://render.com → New + → **Worker**
+2. Connect repo: `Emma-Keaton/aegis-quant`
+3. Configure:
+
+| Field | Value |
+|-------|-------|
+| Name | `aegis-quant-kronos` |
+| Region | Oregon |
+| Environment | Python |
+| Root Directory | `backend` |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `python worker.py` |
+| Instance Type | Basic (2 vCPU, 1GB RAM) |
+
+4. Add environment variables:
+```bash
+DATABASE_URL=postgresql://postgres.[REF]:[PASS]@db.[REF].supabase.co:5432/postgres
+SUPABASE_URL=https://[REF].supabase.co
+```
+
+5. Deploy and note the URL (e.g., `https://aegis-quant-kronos.onrender.com`)
+
+### Step 2: Update Main Backend
+
+Add to backend environment variables:
+```bash
+KRONOS_SERVICE_URL=https://aegis-quant-kronos.onrender.com
+```
+
+The backend will automatically use the Kronos worker for forecasting instead of loading the model locally.
+
+### Step 3: Test
+
+```bash
+# Test worker health
+curl https://aegis-quant-kronos.onrender.com/health
+
+# Test forecast
+curl -X POST https://aegis-quant-kronos.onrender.com/forecast \
+  -H "Content-Type: application/json" \
+  -d '{"closes": [100, 101, 102, 103, 104], "horizon": 10}'
+```
+
+**Cost:** ~$7/mo for Basic worker (free tier available for mini model)
+

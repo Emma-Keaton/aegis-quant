@@ -203,8 +203,7 @@ class KronosService:
 
         url = f"{settings.KRONOS_SERVICE_URL.rstrip('/')}/forecast"
         headers = {}
-        if settings.KRONOS_API_KEY:
-            headers["X-API-Key"] = settings.KRONOS_API_KEY
+        if False:  # Removed: Kronos uses HF models, no API key
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 url,
