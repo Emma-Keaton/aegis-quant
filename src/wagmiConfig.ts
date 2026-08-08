@@ -1,6 +1,14 @@
 import { createConfig, http } from 'wagmi';
-import { injected, walletConnect } from 'wagmi/connectors';
+import { injected } from 'wagmi/connectors';
 import { mainnet, bsc, polygon } from 'wagmi/chains';
+import {
+  connectorsForWallets,
+} from '@rainbow-me/rainbowkit';
+import {
+  bybitWallet,
+  okxWallet,
+  binanceWallet,
+} from '@rainbow-me/rainbowkit/wallets';
 
 let _wagmiConfig: ReturnType<typeof createConfig> | null = null;
 
@@ -26,10 +34,49 @@ async function fetchAppConfig(): Promise<AppConfig> {
   };
 }
 
+const APP_NAME = 'Aegis Quant';
+const APP_URL_FALLBACK = 'https://aegis-quant.vercel.app';
+
+/** Build wagmi connectors — includes exchange wallets via WalletConnect + injected */
+function buildConnectors(projectId: string | null, frontendUrl: string) {
+  if (!projectId) {
+    // No projectId — only injected wallets (MetaMask etc.)
+    return [injected()];
+  }
+
+  return connectorsForWallets(
+    [
+      {
+        groupName: 'Exchange Wallets',
+        wallets: [bybitWallet, okxWallet, binanceWallet],
+      },
+      { groupName: 'Recommended', wallets: [] },
+      { groupName: 'Other Wallets', wallets: [] },
+    ],
+    {
+      projectId,
+      appName: APP_NAME,
+      walletConnectParameters: {
+        qrModalOptions: {
+          themeMode: 'dark',
+          themeVariables: {
+            '--wcm-font-family': 'Inter, sans-serif',
+            '--wcm-accent-color': '#c6ff34',
+            '--wcm-accent-fill-color': '#c6ff34',
+            '--wcm-background-color': '#171717',
+            '--wcm-container-border-radius': '12px',
+            '--wcm-button-border-radius': '8px',
+          },
+        },
+      },
+    },
+  );
+}
+
 /** Create wagmi config — call after fetching app config. */
 export function buildWagmiConfig(appConfig: AppConfig) {
   const projectId = appConfig.walletConnect?.projectId;
-  const frontendUrl = appConfig.frontendUrl ?? 'https://aegis-quant.vercel.app';
+  const frontendUrl = appConfig.frontendUrl ?? APP_URL_FALLBACK;
 
   return createConfig({
     chains: [mainnet, bsc, polygon],
@@ -38,21 +85,16 @@ export function buildWagmiConfig(appConfig: AppConfig) {
       [bsc.id]: http(),
       [polygon.id]: http(),
     },
-    connectors: [
-      injected(),
-      ...(projectId ? [
-        walletConnect({
-          projectId,
-          metadata: {
-            name: 'Aegis Quant',
-            description: 'AI-Powered Crypto Trading Platform',
-            url: frontendUrl,
-            icons: [`${frontendUrl}/icon.png`],
-          },
-        }),
-      ] : []),
-    ],
+    connectors: buildConnectors(projectId, frontendUrl),
   });
+}
+
+/** Get the initialized wagmi config singleton. Must call initWagmi() first. */
+export function getWagmiConfig() {
+  if (!_wagmiConfig) {
+    throw new Error('[Wagmi] Config not initialized. Call initWagmi() first.');
+  }
+  return _wagmiConfig;
 }
 
 /** Async init — call once at app startup before rendering WagmiProvider. */

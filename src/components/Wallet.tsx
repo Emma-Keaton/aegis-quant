@@ -3,6 +3,7 @@ import { connectEVM } from "../crypto/evmConnector";
 import { connectSolana } from "../crypto/solanaConnector";
 import { Link, Wallet as WalletIcon, Shield, Check, ExternalLink, HelpCircle, Eye, Trash2 } from "lucide-react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import WalletConnectUI from "./WalletConnectUI";
 import { UserState } from "../types";
 
@@ -34,6 +35,8 @@ export default function Wallet({
   const [simulatedConnecting, setSimulatedConnecting] = useState<boolean>(false);
   const [connectionSuccess, setConnectionSuccess] = useState<boolean>(false);
 
+  const { openConnectModal } = useConnectModal();
+
   const currency = userState.currency || "USD";
   const nairaRate = userState.nairaRate || 1520;
 
@@ -58,7 +61,7 @@ export default function Wallet({
   const handleConnectEVM = async () => {
     setSimulatedConnecting(true);
     try {
-      const result = await connectEVM('walletconnect');
+      const result = await connectEVM();
       await onConnectWallet(result.network, result.address);
       setConnectionSuccess(true);
     } catch (e) {
@@ -99,12 +102,18 @@ export default function Wallet({
   };
 
   const handleFastConnectBybit = () => {
-    // Standard URL redirect helper for simulated Bybit FAST connect callback
-    window.open("/auth/bybit/callback?code=fast-connect-code-92810", "_self");
+    // Opens WalletConnect modal pre-filtered to Bybit Wallet
+    openConnectModal?.();
   };
 
   const handleFastConnectOKX = () => {
-    alert("Fast connect for OKX account is coming soon! Please use the CeFi Fallback Manual Input below.");
+    // Opens WalletConnect modal pre-filtered to OKX Wallet
+    openConnectModal?.();
+  };
+
+  const handleFastConnectBinance = () => {
+    // Opens WalletConnect modal pre-filtered to Binance Wallet
+    openConnectModal?.();
   };
 
   return (
@@ -374,7 +383,43 @@ export default function Wallet({
             ) : (
               <button
                 onClick={handleFastConnectOKX}
-                className="text-[10px] font-black uppercase text-zinc-300 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900 px-3 py-1.5 rounded-lg active:scale-95 transition-all cursor-pointer"
+                className="text-[10px] font-black uppercase text-[#101416] bg-[#c6ff34] px-3 py-1.5 rounded-lg hover:brightness-110 active:scale-95 transition-all shadow-md shadow-[#c6ff34]/15 cursor-pointer"
+              >
+                FAST LINK
+              </button>
+            )}
+          </div>
+
+          {/* Binance Card */}
+          <div className={`p-4 rounded-2xl border bg-zinc-900/30 flex items-center justify-between transition-all ${
+            userState.connectedCeFi.binance.connected ? "border-[#c6ff34]/40 bg-zinc-950/40" : "border-zinc-800"
+          }`}>
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${userState.connectedCeFi.binance.connected ? "bg-[#c6ff34]" : "bg-zinc-600"}`}></span>
+                <span className="text-sm font-black text-white">Binance (Nigerian Supported Broker)</span>
+              </div>
+              <p className="text-[10px] text-zinc-400 font-mono flex items-center gap-2">
+                {userState.connectedCeFi.binance.connected 
+                  ? "Vault ID: AEC-BIN-••••7f1e" 
+                  : "Status: Standby Vault"}
+                {userState.connectedCeFi.binance.connected && (
+                  <span className="bg-emerald-500/10 text-emerald-400 text-[8px] font-bold px-1.5 py-0.5 rounded uppercase border border-emerald-500/10">READ & TRADE</span>
+                )}
+              </p>
+            </div>
+            {userState.connectedCeFi.binance.connected ? (
+              <button
+                onClick={() => onDisconnectExchange("binance")}
+                className="p-2.5 rounded-xl border border-red-500/20 text-red-400 hover:bg-red-500/10 active:scale-95 transition-all cursor-pointer"
+                title="Disconnect Exchange"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                onClick={handleFastConnectBinance}
+                className="text-[10px] font-black uppercase text-[#101416] bg-[#c6ff34] px-3 py-1.5 rounded-lg hover:brightness-110 active:scale-95 transition-all shadow-md shadow-[#c6ff34]/15 cursor-pointer"
               >
                 FAST LINK
               </button>

@@ -1,52 +1,18 @@
-import { createConfig, http, injected } from 'wagmi';
-import { walletConnect } from 'wagmi/connectors';
 import { connect, getAccount } from 'wagmi/actions';
-import { mainnet, bsc, polygon } from 'wagmi/chains';
-
-const WALLET_CONNECT_PROJECT_ID = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || 'YOUR_PROJECT_ID_HERE';
-
-let _config: ReturnType<typeof createConfig> | null = null;
-
-function getConfig() {
-  if (!_config) {
-    _config = createConfig({
-      chains: [mainnet, bsc, polygon],
-      transports: {
-        [mainnet.id]: http(),
-        [bsc.id]: http(),
-        [polygon.id]: http(),
-      },
-      connectors: [
-        injected(),
-        walletConnect({
-          projectId: WALLET_CONNECT_PROJECT_ID,
-          metadata: {
-            name: 'Aegis Quant',
-            description: 'AI-Powered Crypto Trading Platform',
-            url: 'https://aegis-quant.vercel.app',
-            icons: ['https://aegis-quant.vercel.app/icon.png'],
-          },
-        }),
-      ],
-    });
-  }
-  return _config;
-}
+import { getWagmiConfig } from '../wagmiConfig';
 
 /**
  * Connect to an EVM wallet using wagmi/viem.
- * Supports MetaMask (injected) and WalletConnect.
+ * Supports MetaMask (injected), OKX Wallet, Bybit Wallet, Binance Wallet,
+ * and any other WalletConnect-compatible wallet via the shared wagmi config.
  * Returns a human-readable network name and the user's address.
  */
-export async function connectEVM(
-  preferred: 'metamask' | 'walletconnect' = 'metamask'
-): Promise<{ network: string; address: string }> {
-  const config = getConfig();
+export async function connectEVM(): Promise<{ network: string; address: string }> {
+  const config = getWagmiConfig();
 
+  // Prefer injected (MetaMask etc.), fallback to first available connector
   const connector =
-    (preferred === 'walletconnect'
-      ? config.connectors.find((c) => c.id === 'walletConnect')
-      : config.connectors.find((c) => c.id === 'injected')) || config.connectors[0];
+    config.connectors.find((c) => c.id === 'injected') || config.connectors[0];
 
   if (!connector) {
     throw new Error('No EVM connector available');

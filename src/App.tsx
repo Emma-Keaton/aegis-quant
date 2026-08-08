@@ -25,7 +25,8 @@ const DEFAULT_USER_STATE: UserState = {
   positions: [],
   connectedCeFi: {
     bybit: { connected: false, encryptedKeys: null },
-    okx: { connected: false, encryptedKeys: null }
+    okx: { connected: false, encryptedKeys: null },
+    binance: { connected: false, encryptedKeys: null }
   }
 };
 

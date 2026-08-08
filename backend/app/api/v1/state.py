@@ -50,7 +50,7 @@ class UserStateOut(BaseModel):
     currency: str = "USD"
     nairaRate: float
     positions: List[PositionItem] = []
-    connectedCeFi: dict = {"bybit": {"connected": False, "encryptedKeys": None}, "okx": {"connected": False, "encryptedKeys": None}}
+    connectedCeFi: dict = {"bybit": {"connected": False, "encryptedKeys": None}, "okx": {"connected": False, "encryptedKeys": None}, "binance": {"connected": False, "encryptedKeys": None}}
 
 
 class RiskSettingsOut(BaseModel):
@@ -136,13 +136,15 @@ async def _map_cefi_keys(profile_id, db: AsyncSession) -> dict:
             "connected": True,
             "encryptedKeys": f"aes-256:{c.encrypted_api_key[:16]}...",
         }
-    # Ensure bybit and okx keys exist
-    if "bybit" not in ceFi:
-        ceFi["bybit"] = {"connected": False, "encryptedKeys": None}
-    if "okx" not in ceFi:
-        ceFi["okx"] = {"connected": False, "encryptedKeys": None}
-    return {"bybit": ceFi.get("bybit", {"connected": False, "encryptedKeys": None}),
-            "okx": ceFi.get("okx", {"connected": False, "encryptedKeys": None})}
+    # Ensure bybit, okx, and binance keys exist
+    for exch in ("bybit", "okx", "binance"):
+        if exch not in ceFi:
+            ceFi[exch] = {"connected": False, "encryptedKeys": None}
+    return {
+        "bybit": ceFi.get("bybit", {"connected": False, "encryptedKeys": None}),
+        "okx": ceFi.get("okx", {"connected": False, "encryptedKeys": None}),
+        "binance": ceFi.get("binance", {"connected": False, "encryptedKeys": None}),
+    }
 
 
 async def _map_whitelist(profile_id, db: AsyncSession) -> List[str]:

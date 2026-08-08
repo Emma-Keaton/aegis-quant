@@ -31,6 +31,7 @@ export interface UserState {
   connectedCeFi: {
     bybit: CeFiConnection;
     okx: CeFiConnection;
+    binance: CeFiConnection;
   };
 }
 
