@@ -41,6 +41,7 @@ from app.api.websocket import router as ws_router
 from app.api.v1.telegram import router as telegram_router
 from app.api.v1.admin import router as admin_router
 from app.api.v1.sources import router as sources_router
+from app.api.v1.config import router as config_router
 
 # ── Logging ───────────────────────────────────────────────────────
 
@@ -242,6 +243,7 @@ def create_app() -> FastAPI:
     from app.api.v1.admin import router as admin_router
     app.include_router(admin_router)
     app.include_router(sources_router)  # Source management
+    app.include_router(config_router)   # Public app config
     # Metrics API
     from app.api.v1.metrics import router as metrics_router
     app.include_router(metrics_router)

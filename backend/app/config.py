@@ -132,6 +132,9 @@ class Settings(BaseSettings):
     AUTO_CONFIDENCE_THRESHOLD: int = 75
     KRONOS_TIMEOUT: float = 10.0
 
+    # WalletConnect / Reown
+    WALLET_CONNECT_PROJECT_ID: str = ""
+
     # Bot commands
     BOT_COMMANDS: List[Dict[str, str]] = [
         {"command": "start", "description": "Launch Mini App with trading bot"},
