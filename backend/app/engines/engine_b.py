@@ -13,6 +13,7 @@ Supports user-customizable sources via SourceRegistry.
 import asyncio
 import logging
 import re
+import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from dataclasses import dataclass
@@ -307,6 +308,18 @@ class EngineB:
         self.telegram = TelegramScraper()
         self.reddit = RedditScraper()
         self.onchain = OnChainScraper()
+        # Per-source cooldown to protect rate-limited external APIs (Twitter/
+        # Telegram/CoinGecko) when scanning at fast cadence.
+        self._cooldown: Dict[str, float] = {}
+        self._cooldown_seconds = settings.ENGINE_B_SCRAPE_COOLDOWN_SECONDS
+
+    def _cooldown_ready(self, source_type: str) -> bool:
+        """True if enough time has passed since the last fetch of this source."""
+        now = time.time()
+        if now - self._cooldown.get(source_type, 0.0) >= self._cooldown_seconds:
+            self._cooldown[source_type] = now
+            return True
+        return False
         self.active_users: Dict[int, Profile] = {}
 
     async def initialize(self):
@@ -357,11 +370,11 @@ class EngineB:
         twitter_sources = [s for s in sources if s.source_type == SourceType.TWITTER]
         twitter_handles = [s.url_or_handle for s in twitter_sources]
         
-        twitter_signals = await self.twitter.fetch_signals(twitter_handles)
-        rss_signals = await self.rss.fetch_signals(sources)
-        telegram_signals = await self.telegram.fetch_signals(sources)
-        reddit_signals = await self.reddit.fetch_signals(sources)
-        onchain_signals = await self.onchain.fetch_signals(sources)
+        twitter_signals = await self.twitter.fetch_signals(twitter_handles) if self._cooldown_ready("twitter") else []
+        rss_signals = await self.rss.fetch_signals(sources) if self._cooldown_ready("rss") else []
+        telegram_signals = await self.telegram.fetch_signals(sources) if self._cooldown_ready("telegram") else []
+        reddit_signals = await self.reddit.fetch_signals(sources) if self._cooldown_ready("reddit") else []
+        onchain_signals = await self.onchain.fetch_signals(sources) if self._cooldown_ready("onchain") else []
 
         # Combine all signals
         all_signals = (twitter_signals + rss_signals + telegram_signals + 

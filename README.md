@@ -158,8 +158,16 @@ npm run build
 - Root directory: `backend`
 - Build: `pip install -r requirements.txt`
 - Start: `python worker.py`
-- `AEGIS_ROLE=worker` — starts the trading engines (A/B), Telethon channel polling,
-  and market feed; only the web service handles webhooks.
+- On boot it starts the trading engines (**Engine A** technical/trigger + **Engine B**
+  social sentiment), Telethon channel polling, market feed, and warms up replacement
+  forecasts.
+- `worker.py` does **not** load a local Kronos model (no torch/transformers here) —
+  it uses the replacement forecaster and, when configured, proxies to the dedicated
+  Kronos service (see below).
+- Fast scan cadences are configurable:
+  `ENGINE_A_SCAN_SECONDS` (default **30s**), `ENGINE_B_SCAN_SECONDS` (default **60s**,
+  limited by external scrapers), plus `ENGINE_B_SCRAPE_COOLDOWN_SECONDS` (default 90s)
+  to protect rate-limited Twitter/Telegram/CoinGecko APIs.
 
 ### 4. Vercel — Frontend
 - Framework: Vite. Build: `npm run build`, output `dist/`.
@@ -196,9 +204,9 @@ aegis-quant/
 │   │   │   ├── telegram.py         # Webhook handler
 │   │   │   └── ...
 │   │   ├── engines/                 # Trading engines
-│   │   │   ├── engine_a.py         # Technical + Kronos
+│   │   │   ├── engine_a.py         # Technical/trigger
 │   │   │   ├── engine_b.py         # Social sentiment
-│   │   │   └── engine_scheduler.py # Loop scheduler
+│   │   │   └── engine_scheduler.py # Loop scheduler (+ forecast precompute)
 │   │   ├── core/                    # Auth, security, config
 │   │   ├── models/                  # SQLAlchemy models
 │   │   ├── services/                # Business logic
@@ -228,13 +236,17 @@ aegis-quant/
 
 ---
 
-## 🤖 Deploying Kronos Worker (Optional)
+## 🤖 Deploying Kronos (Optional — real model forecasting)
 
-The Kronos AI forecasting service can be deployed as a separate Render Worker for better performance.
+Kronos is the foundation-model forecaster. The main backend and the worker do **not**
+run the Kronos model locally (no torch/transformers installed). By default they use a
+lightweight **replacement forecaster** (deterministic, with an optional statistical
+tier) for prediction + confidence. To enable real Kronos forecasting, deploy the
+dedicated service in `kronos/` and point the backend at it.
 
-### Step 1: Deploy Kronos Worker
+### Step 1: Deploy the Kronos service
 
-1. Go to https://render.com → New + → **Worker**
+1. Go to https://render.com → New + → **Web Service**
 2. Connect repo: `Emma-Keaton/aegis-quant`
 3. Configure:
 
@@ -243,39 +255,39 @@ The Kronos AI forecasting service can be deployed as a separate Render Worker fo
 | Name | `aegis-quant-kronos` |
 | Region | Oregon |
 | Environment | Python |
-| Root Directory | `backend` |
+| Root Directory | `kronos` |
 | Build Command | `pip install -r requirements.txt` |
-| Start Command | `python worker.py` |
+| Start Command | `uvicorn app:app --host 0.0.0.0 --port $PORT` |
 | Instance Type | Basic (2 vCPU, 1GB RAM) |
 
-4. Add environment variables:
-```bash
-DATABASE_URL=postgresql://postgres.[REF]:[PASS]@db.[REF].supabase.co:5432/postgres
-SUPABASE_URL=https://[REF].supabase.co
-```
-
+4. To run **real inference**, install the Kronos lib + torch in `kronos/requirements.txt`
+   and set `KRONOS_LOAD_MODEL=1`. While `KRONOS_LOAD_MODEL=0` (default), this service returns
+   a placeholder — fine for wiring up the integration end-to-end.
 5. Deploy and note the URL (e.g., `https://aegis-quant-kronos.onrender.com`)
 
-### Step 2: Update Main Backend
+### Step 2: Point the backend at Kronos
 
-Add to backend environment variables:
+Add to the **API** and **Worker** environment variables:
+
 ```bash
 KRONOS_SERVICE_URL=https://aegis-quant-kronos.onrender.com
 ```
 
-The backend will automatically use the Kronos worker for forecasting instead of loading the model locally.
+The backend proxies `forecast` requests to it; on any failure it falls back to the
+replacement forecaster, so forecasting never hard-fails.
 
 ### Step 3: Test
 
 ```bash
-# Test worker health
+# Test service health
 curl https://aegis-quant-kronos.onrender.com/health
 
 # Test forecast
 curl -X POST https://aegis-quant-kronos.onrender.com/forecast \
   -H "Content-Type: application/json" \
-  -d '{"closes": [100, 101, 102, 103, 104], "horizon": 10}'
+  -d '{"closes": [100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116], "horizon": 10}'
 ```
 
-**Cost:** ~$7/mo for Basic worker (free tier available for mini model)
+**Cost:** ~$7/mo for Basic (or free while `KRONOS_LOAD_MODEL=0`, using the placeholder/replacement).
+
 

@@ -61,9 +61,12 @@ CORS_ORIGINS=*
 
 ---
 
-## Step 3: Deploy Kronos Worker (Optional)
+## Step 3: Deploy Kronos (Optional — real model forecasting)
 
-**Note:** Mini model (4.1M params) may work on free tier. If it fails, skip this step — backend runs fine without Kronos.
+The main backend/worker do **not** run the Kronos model locally. To enable real Kronos
+predictions, deploy the dedicated service in `kronos/` and set `KRONOS_SERVICE_URL` on
+the backend. Without it, the backend uses a lightweight replacement forecaster
+(deterministic) — it still returns prediction + confidence.
 
 1. Go to https://render.com → New + → **Web Service**
 2. Connect same GitHub repo
@@ -74,31 +77,27 @@ CORS_ORIGINS=*
 | Name | `aegis-quant-kronos` |
 | Region | Oregon |
 | Environment | Python |
-| Root Directory | `backend` |
+| Root Directory | `kronos` |
 | Build Command | `pip install -r requirements.txt` |
-| Start Command | `python worker.py` |
+| Start Command | `uvicorn app:app --host 0.0.0.0 --port $PORT` |
 | Instance Type | Basic (2 vCPU, 1GB RAM) — NOT starter |
 
-4. Add Environment Variables:
-
-```
-DATABASE_URL=same as backend
-SUPABASE_URL=same as backend
-SUPABASE_SERVICE_ROLE_KEY=same as backend
-```
-
+4. To run **real inference**, install the Kronos lib + torch in `kronos/requirements.txt`
+   and set `KRONOS_LOAD_MODEL=1`. While `KRONOS_LOAD_MODEL=0`, this service returns a
+   placeholder (fine for smoke-testing the integration).
 5. Click **Create Web Service**
 6. After deploy, get the URL: `https://aegis-quant-kronos.onrender.com`
 
 ### Update Backend to Use Kronos
 
-Go to Backend service → Environment → Add:
+Go to Backend (and Worker) service → Environment → Add:
 
 ```
 KRONOS_SERVICE_URL=https://aegis-quant-kronos.onrender.com
 ```
 
-Re-deploy backend.
+Re-deploy. The backend proxies forecasts to it and falls back to the replacement
+forecaster on any failure.
 
 ---
 
@@ -154,7 +153,7 @@ curl https://aegis-quant-api.onrender.com/metrics
 |---------|------|------|
 | Backend API | Starter | Free |
 | Frontend | Static | Free |
-| Kronos Worker | Basic (optional) | ~$7/mo |
+| Kronos (optional) | Basic | ~$7/mo |
 | Supabase | Free | Free (500MB DB) |
 
 **Total: Free** (Kronos optional)

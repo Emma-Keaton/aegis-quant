@@ -348,7 +348,7 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
                       </div>
                       <div className="space-y-0.5">
                         <p className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">CONFIDENCE</p>
-                        <p className="text-xs font-extrabold text-[#c6ff34]">{confidence}%</p>
+                        <p className="text-xs font-extrabold font-mono text-[#c6ff34]">{confidence}%</p>
                       </div>
                     </div>
 

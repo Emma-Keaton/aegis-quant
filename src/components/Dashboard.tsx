@@ -345,20 +345,20 @@ export default function Dashboard({ userState, onToggleAgent, onNavigateToStrate
                 <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Best Performer</p>
                 <div className="flex justify-between items-end mt-1.5">
                   <span className="text-sm font-black text-white">SOL</span>
-                  <span className="text-[10px] font-bold bg-[#c6ff34]/10 text-[#c6ff34] px-1 py-0.5 rounded">+84%</span>
+                  <span className="text-[10px] font-bold font-mono bg-[#c6ff34]/10 text-[#c6ff34] px-1.5 py-0.5 rounded">+84%</span>
                 </div>
               </div>
               <div className="bg-[#1c2023] border border-zinc-800/60 rounded-xl p-3">
                 <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Worst Performer</p>
                 <div className="flex justify-between items-end mt-1.5">
                   <span className="text-sm font-black text-white">PEPE</span>
-                  <span className="text-[10px] font-bold bg-red-500/10 text-red-400 px-1 py-0.5 rounded">-12%</span>
+                  <span className="text-[10px] font-bold font-mono bg-red-500/10 text-red-400 px-1.5 py-0.5 rounded">-12%</span>
                 </div>
               </div>
               <div className="bg-[#1c2023] border border-zinc-800/60 rounded-xl p-3 col-span-2 flex justify-between items-center">
                 <div>
                   <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Avg Gas Fee</p>
-                  <span className="text-base font-black text-white mt-1 block">$0.12</span>
+                  <span className="text-base font-black font-mono text-white mt-1 block">$0.12</span>
                 </div>
                 <button 
                   onClick={onNavigateToLogs}
@@ -376,16 +376,16 @@ export default function Dashboard({ userState, onToggleAgent, onNavigateToStrate
                 <div className="bg-[#1c2023] border border-zinc-800/60 rounded-xl p-3 flex justify-between items-center">
                   <div>
                     <h5 className="text-xs font-bold text-white">Jupiter DEX</h5>
-                    <p className="text-[10px] text-zinc-400">Daily Volume: $1.2M</p>
+                    <p className="text-[10px] font-mono text-zinc-400">Daily Volume: $1.2M</p>
                   </div>
-                  <span className="text-xs font-bold text-[#c6ff34]">APY: 6.42%</span>
+                  <span className="text-xs font-bold font-mono text-[#c6ff34]">APY: 6.42%</span>
                 </div>
                 <div className="bg-[#1c2023] border border-zinc-800/60 rounded-xl p-3 flex justify-between items-center">
                   <div>
                     <h5 className="text-xs font-bold text-white">Kamino Finance</h5>
-                    <p className="text-[10px] text-zinc-400">Daily Volume: $450k</p>
+                    <p className="text-[10px] font-mono text-zinc-400">Daily Volume: $450k</p>
                   </div>
-                  <span className="text-xs font-bold text-[#c6ff34]">APY: 12.80%</span>
+                  <span className="text-xs font-bold font-mono text-[#c6ff34]">APY: 12.80%</span>
                 </div>
               </div>
             </div>

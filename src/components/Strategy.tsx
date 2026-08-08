@@ -448,7 +448,7 @@ export default function Strategy({
           <div className="space-y-2">
             <div className="flex justify-between items-center text-xs font-bold text-zinc-400">
               <span>MAX ALLOCATION PER TRADE</span>
-              <span className="text-[#c6ff34] text-sm font-black">{allocation}%</span>
+              <span className="text-[#c6ff34] text-sm font-black font-mono">{allocation}%</span>
             </div>
             <input
               type="range"
@@ -528,7 +528,7 @@ export default function Strategy({
                   value={stopLoss}
                   onChange={(e) => setStopLoss(e.target.value)}
                   onBlur={() => handleNumericBlur("stopLoss", stopLoss)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 text-center font-bold focus:outline-none focus:border-[#c6ff34]"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 text-center font-bold font-mono focus:outline-none focus:border-[#c6ff34]"
                 />
                 <span className="absolute right-3 top-2.5 text-xs text-[#c6ff34] font-black font-sans">%</span>
               </div>
@@ -542,7 +542,7 @@ export default function Strategy({
                   value={takeProfit}
                   onChange={(e) => setTakeProfit(e.target.value)}
                   onBlur={() => handleNumericBlur("takeProfit", takeProfit)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 text-center font-bold focus:outline-none focus:border-[#c6ff34]"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 text-center font-bold font-mono focus:outline-none focus:border-[#c6ff34]"
                 />
                 <span className="absolute right-3 top-2.5 text-xs text-[#c6ff34] font-black font-sans">%</span>
               </div>
@@ -556,7 +556,7 @@ export default function Strategy({
                   value={trailing}
                   onChange={(e) => setTrailing(e.target.value)}
                   onBlur={() => handleNumericBlur("trailingStop", trailing)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 text-center font-bold focus:outline-none focus:border-[#c6ff34]"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 text-center font-bold font-mono focus:outline-none focus:border-[#c6ff34]"
                 />
                 <span className="absolute right-3 top-2.5 text-xs text-[#c6ff34] font-black font-sans">%</span>
               </div>
@@ -582,7 +582,7 @@ export default function Strategy({
                 onUpdateSettings({ baseTradeUsd: val });
               }
             }}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 text-center font-bold focus:outline-none focus:border-[#c6ff34]"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 text-center font-bold font-mono focus:outline-none focus:border-[#c6ff34]"
           />
           <span className="ml-2 text-[#c6ff34] font-bold text-sm">USD</span>
         </div>

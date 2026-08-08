@@ -6,7 +6,8 @@ import Strategy from "./components/Strategy";
 import Intel from "./components/Intel";
 import Logs from "./components/Logs";
 import { setSessionToken, getSessionToken, clearSession, apiJson, apiFetch, getInitData, getApiBase } from "./api/client";
-import { Home, Wallet as WalletIcon, Sliders, Zap, History, RefreshCw } from "lucide-react";
+import { Home, Wallet as WalletIcon, Sliders, Zap, History } from "lucide-react";
+import SkeletonLoader from "./components/SkeletonLoader";
 
 const DEFAULT_USER_STATE: UserState = {
   walletConnected: false,
@@ -30,7 +31,7 @@ const DEFAULT_USER_STATE: UserState = {
   }
 };
 
-export default function App() {
+export default function App({ walletReady = true }: { walletReady?: boolean }) {
   const [currentTab, setCurrentTab] = useState<"home" | "wallet" | "strategy" | "intel" | "logs" | "admin">("home");
   const [loading, setLoading] = useState<boolean>(true);
   const [stateError, setStateError] = useState<string | null>(null);
@@ -373,10 +374,7 @@ export default function App() {
           )}
 
           {loading ? (
-            <div className="h-[75vh] flex flex-col items-center justify-center space-y-3">
-              <RefreshCw className="w-8 h-8 text-[#c6ff34] animate-spin" />
-              <p className="text-xs text-zinc-500 font-mono uppercase tracking-widest font-black">AEGIS QUANT BOOTING...</p>
-            </div>
+            <SkeletonLoader frame={false} label="AEGIS QUANT BOOTING" />
           ) : (
             <>
               {currentTab === "home" && (
@@ -391,17 +389,25 @@ export default function App() {
                   onToggleNetworkOffline={setNetworkOffline}
                 />
               )}
-              {currentTab === "wallet" && (
-                <Wallet
-                  userState={userState}
-                  onConnectWallet={handleConnectWallet}
-                  onLinkExchangeManual={handleLinkExchangeManual}
-                  onDisconnectExchange={handleDisconnectExchange}
-                  onNavigateToLogs={() => setCurrentTab("logs")}
-                  networkOffline={networkOffline}
-                  onUpdatePaperBalance={handleUpdatePaperBalance}
-                />
-              )}
+              {currentTab === "wallet" &&
+                (walletReady ? (
+                  <Wallet
+                    userState={userState}
+                    onConnectWallet={handleConnectWallet}
+                    onLinkExchangeManual={handleLinkExchangeManual}
+                    onDisconnectExchange={handleDisconnectExchange}
+                    onNavigateToLogs={() => setCurrentTab("logs")}
+                    networkOffline={networkOffline}
+                    onUpdatePaperBalance={handleUpdatePaperBalance}
+                  />
+                ) : (
+                  <div className="h-[70vh] flex flex-col items-center justify-center space-y-3">
+                    <div className="w-10 h-10 rounded-2xl skeleton-shimmer" />
+                    <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 font-black">
+                      CONNECTING WALLETS...
+                    </p>
+                  </div>
+                ))}
               {currentTab === "strategy" && (
                 <Strategy
                   riskSettings={riskSettings}

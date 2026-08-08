@@ -76,8 +76,14 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="w-8 h-8 text-[#c6ff34] animate-spin" />
+      <div className="space-y-4 p-4">
+        <div className="h-6 w-1/3 skeleton-shimmer" />
+        <div className="grid grid-cols-2 gap-4">
+          <div className="h-24 rounded-2xl skeleton-shimmer" />
+          <div className="h-24 rounded-2xl skeleton-shimmer" />
+          <div className="h-24 rounded-2xl skeleton-shimmer" />
+          <div className="h-24 rounded-2xl skeleton-shimmer" />
+        </div>
       </div>
     );
   }
@@ -128,7 +134,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 <Activity className="w-5 h-5 text-[#c6ff34]" />
                 <span className="text-xs font-bold text-zinc-400 uppercase">Trades Today</span>
               </div>
-              <p className="text-3xl font-black text-white">{metrics?.trades_today || 0}</p>
+              <p className="text-3xl font-black font-mono text-white">{metrics?.trades_today || 0}</p>
             </div>
             
             <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
@@ -136,7 +142,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 {metrics?.pnl_usd >= 0 ? <TrendingUp className="w-5 h-5 text-green-400" /> : <TrendingDown className="w-5 h-5 text-red-400" />}
                 <span className="text-xs font-bold text-zinc-400 uppercase">PnL Today</span>
               </div>
-              <p className={`text-3xl font-black ${metrics?.pnl_usd >= 0 ? "text-green-400" : "text-red-400"}`}>
+              <p className={`text-3xl font-black font-mono ${metrics?.pnl_usd >= 0 ? "text-green-400" : "text-red-400"}`}>
                 ${metrics?.pnl_usd?.toFixed(2) || 0}
               </p>
             </div>
@@ -146,7 +152,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 <Shield className="w-5 h-5 text-blue-400" />
                 <span className="text-xs font-bold text-zinc-400 uppercase">Open Positions</span>
               </div>
-              <p className="text-3xl font-black text-white">{metrics?.open_positions || 0}</p>
+              <p className="text-3xl font-black font-mono text-white">{metrics?.open_positions || 0}</p>
             </div>
 
             <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
@@ -154,7 +160,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 <AlertCircle className="w-5 h-5 text-yellow-400" />
                 <span className="text-xs font-bold text-zinc-400 uppercase">Errors (24h)</span>
               </div>
-              <p className="text-3xl font-black text-white">{metrics?.errors_total || 0}</p>
+              <p className="text-3xl font-black font-mono text-white">{metrics?.errors_total || 0}</p>
             </div>
 
             <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
@@ -162,7 +168,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 <TrendingUp className="w-5 h-5 text-[#c6ff34]" />
                 <span className="text-xs font-bold text-zinc-400 uppercase">Win Rate</span>
               </div>
-              <p className="text-3xl font-black text-[#c6ff34]">{metrics?.win_rate_pct || 0}%</p>
+              <p className="text-3xl font-black font-mono text-[#c6ff34]">{metrics?.win_rate_pct || 0}%</p>
             </div>
 
             <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
@@ -170,7 +176,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 <Clock className="w-5 h-5 text-purple-400" />
                 <span className="text-xs font-bold text-zinc-400 uppercase">Uptime</span>
               </div>
-              <p className="text-3xl font-black text-white">{metrics?.uptime_hours ? `${(metrics.uptime_hours / 24).toFixed(1)}d` : "N/A"}</p>
+              <p className="text-3xl font-black font-mono text-white">{metrics?.uptime_hours ? `${(metrics.uptime_hours / 24).toFixed(1)}d` : "N/A"}</p>
             </div>
           </div>
 

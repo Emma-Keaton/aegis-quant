@@ -27,11 +27,14 @@ cryptography
 # HTTP
 httpx
 
-# PyTorch CPU (for Kronos client)
-torch --index-url https://download.pytorch.org/whl/cpu
-transformers
+# ML / data (Kronos runs on a separate service, so torch/transformers are NOT
+# installed here — keep this service lean on memory).
 pandas
 numpy
+
+# Optional: statistical forecasting fallback tier (ETS/Holt-Winters). Disabled by
+# default to stay lean; the deterministic tier is used instead via a guarded import.
+# statsmodels>=0.14.0
 
 # Social scraping (Engine B)
 feedparser

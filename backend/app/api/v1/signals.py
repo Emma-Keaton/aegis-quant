@@ -19,6 +19,7 @@ from app.database import get_db
 from app.models import Profile, Signal
 from app.schemas.signals import SignalResponse, SignalListResponse
 from app.services.kronos_service import get_kronos_client
+from app.services.forecasting import get_forecasting_service
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -62,8 +63,23 @@ async def _get_kronos_signals_for_ticker(ticker: str, lookback: int = 200) -> Li
     except Exception as e:
         logger.warning(f"Kronos signal generation failed for {ticker}: {e}")
 
-    # Fallback: generate deterministic mock signal
-    return [_generate_kronos_signal(ticker, np.random.randint(70, 95), "Kronos: baseline signal derived from technical patterns")]
+    # Fallback: use the tiered replacement forecaster for a deterministic signal
+    try:
+        fr = await get_forecasting_service().forecast(
+            symbol=ticker, closes=closes, horizon=24, samples=30
+        )
+        if fr.mean_path:
+            change = (fr.mean_path[0] - closes[-1]) / closes[-1]
+            confidence = int(max(40, min(95, fr.confidence)))
+            direction = "upward" if change > 0 else "downward"
+            source = fr.metadata.get("model_source", "replacement")
+            analysis = f"{source} forecast: {change*100:.1f}% {direction} momentum"
+            return [_generate_kronos_signal(ticker, confidence, analysis)]
+    except Exception as e2:
+        logger.warning(f"Replacement signal generation failed for {ticker}: {e2}")
+
+    # Last-resort deterministic baseline (not random)
+    return [_generate_kronos_signal(ticker, 50, "Aegis: baseline signal derived from technical patterns")]
 
 
 @router.get("", response_model=SignalListResponse)
@@ -100,6 +116,9 @@ async def get_signals(
             logger.warning(f"Signal generation error: {signals}")
             continue
         signal_list.extend(signals)
+
+    # Rank by confidence (descending) for deterministic cross-ticker ranking
+    signal_list = sorted(signal_list, key=lambda s: s.get("confidence", 0), reverse=True)
 
     # Limit to requested limit
     signal_list = signal_list[:limit]

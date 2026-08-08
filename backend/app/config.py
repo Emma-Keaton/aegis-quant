@@ -140,6 +140,24 @@ class Settings(BaseSettings):
     AUTO_CONFIDENCE_THRESHOLD: int = 75
     KRONOS_TIMEOUT: float = 10.0
 
+    # ── Forecasting fallback / replacement (when Kronos unavailable) ──────
+    FALLBACK_FORECAST_MODE: str = "auto"  # auto | deterministic | statistical
+    FORECAST_CACHE_TTL: int = 900  # seconds (15 min)
+    FORECAST_MIN_CANDLES: int = 50  # below this, confidence is marked reduced
+    FORECAST_BATCH_TOP_N: int = 20  # symbols to refit per scheduler cycle
+    FORECAST_BATCH_INTERVAL_SECONDS: int = 60
+    FORECAST_BATCH_ENABLED: bool = True
+
+    # ── Engine scan cadence (fast polling for volatile markets) ───────────
+    ENGINE_SCAN_ENABLED: bool = True
+    # Engine A (technical/trigger scan): cheap price trigger poll every 30s.
+    ENGINE_A_SCAN_SECONDS: int = 30
+    # Engine B (social sentiment): external scrapers (Twitter/Telegram/CoinGecko)
+    # are rate-limited, so default to 60s to avoid bans.
+    ENGINE_B_SCAN_SECONDS: int = 60
+    # Minimum seconds between scraping the same external source (per-source cooldown).
+    ENGINE_B_SCRAPE_COOLDOWN_SECONDS: int = 90
+
     # WalletConnect / Reown
     WALLET_CONNECT_PROJECT_ID: str = ""
 
