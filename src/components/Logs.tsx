@@ -4,9 +4,9 @@ import { TransactionLog } from "../types";
 import { apiFetch, clearSession } from "../api/client";
 import AdminDashboard from "./AdminDashboard";
 
-// Helper component for the admin button
+// Helper component for the admin button - always visible, shows state based on auth
 function AdminButton({ onOpenAdmin }: { onOpenAdmin: () => void }) {
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   // Check admin status on mount
@@ -15,7 +15,8 @@ function AdminButton({ onOpenAdmin }: { onOpenAdmin: () => void }) {
       try {
         const res = await apiFetch("/api/admin/status");
         if (res.ok) {
-          setIsAdmin(true);
+          const data = await res.json();
+          setIsAdmin(data.is_admin === true);
         } else {
           setIsAdmin(false);
         }
@@ -30,29 +31,35 @@ function AdminButton({ onOpenAdmin }: { onOpenAdmin: () => void }) {
   }, []);
 
   if (loading) {
-    return null; // Don't show anything while checking auth
-  }
-
-  if (!isAdmin) {
-    // Non-admin users see a grayed-out button that shows a popup message when clicked
     return (
       <button
-        onClick={() => alert("Admin access denied. Only the designated administrator chat ID can access this feature. Contact support.")}
-        className="bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-[#c6ff34] hover:border-[#c6ff34]/40 text-xs px-3 py-1.5 rounded-xl transition-all flex items-center gap-1"
-        title="Admin access required"
+        disabled
+        className="bg-zinc-900 border border-zinc-800 text-zinc-500 text-xs px-3 py-1.5 rounded-xl font-mono cursor-not-allowed"
       >
-        <ShieldAlert className="w-3.5 h-3.5" /> Admin
+        <Shield className="w-3.5 h-3.5 inline mr-1" /> Checking...
       </button>
     );
   }
 
-  // Admin user sees the green button
+  if (!isAdmin) {
+    // Non-admin users see a grayed-out button with clear status
+    return (
+      <button
+        className="bg-zinc-900 border border-zinc-700 text-zinc-400 hover:text-zinc-300 hover:border-zinc-600 text-xs px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5"
+        title="Admin access required"
+      >
+        <ShieldAlert className="w-3.5 h-3.5" /> Admin (Locked)
+      </button>
+    );
+  }
+
+  // Admin user sees the green active button
   return (
     <button
       onClick={onOpenAdmin}
-      className="bg-[#c6ff34] text-black font-bold text-xs px-3 py-1.5 rounded-xl hover:bg-[#b0f020] transition-all flex items-center gap-1"
+      className="bg-[#c6ff34] text-black font-bold text-xs px-3 py-1.5 rounded-xl hover:bg-[#b0f020] transition-all flex items-center gap-1.5 shadow-md shadow-[#c6ff34]/20"
     >
-      <Shield className="w-3.5 h-3.5" /> Admin
+      <Shield className="w-3.5 h-3.5" /> Admin Access
     </button>
   );
 }
@@ -87,26 +94,6 @@ export default function Logs() {
     fetchLogs();
   }, [typeFilter]);
 
-  const handleSimulateInboundLog = async () => {
-    try {
-      // Post a new simulated filled buy position to verify state is fully linked
-      const res = await apiFetch("/api/logs", {
-        method: "POST",
-        body: JSON.stringify({
-          type: "BUY",
-          pair: "SOL/USDT",
-          volume: `$${(Math.random() * 300 + 100).toFixed(2)}`,
-          status: "Filled"
-        })
-      });
-      if (res.ok) {
-        fetchLogs(false);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   return (
     <div className="space-y-6 pb-24 font-sans" id="logs_screen">
       {/* Header */}
@@ -116,12 +103,6 @@ export default function Logs() {
           <h2 className="text-lg font-black tracking-wider uppercase text-[#c6ff34]">TRANSACTION LOGS</h2>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={handleSimulateInboundLog}
-            className="bg-zinc-900 border border-zinc-800 hover:border-[#c6ff34]/40 text-white font-bold text-xs px-3 py-1.5 rounded-xl transition-all font-mono"
-          >
-            + TEST TRADE EVENT
-          </button>
           <AdminButton onOpenAdmin={() => setShowAdminModal(true)} />
         </div>
       </div>

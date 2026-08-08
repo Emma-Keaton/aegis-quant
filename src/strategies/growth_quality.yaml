@@ -1,25 +1,25 @@
 name: growth_quality
-display_name: 成长质价
-description: 通过收入增长、ROE 与价格/成交量配合筛选高质量成长币。
+display_name: Growth & Quality
+description: Screens for high-quality growth tokens via revenue growth, ROE, and volume-price confirmation.
 category: quality
 core_rules: [4, 6, 7]
 required_tools:
   - get_daily_history
   - analyze_trend
-aliases: [成长, 质价]
+aliases: [growth, quality]
 default_active: true
 default_router: false
 default_priority: 25
 market_regimes: [growth]
 instructions: |
-  **成长质价（Growth & Quality Strategy）**
+  **Growth & Quality Strategy**
 
-  1. **基本面筛选**：筛选市值 1‑10 B 的币种，要求最近 3 个月收入（或链上交易量）环比增长 ≥ 20%。
-  2. **质量过滤**：ROE（或链上等价指标） ≥ 15%。
-  3. **价格‑量配合**：使用 `get_daily_history` 检查最近 7 天的成交量是否高于 10 天均量的 1.3 倍，且价格未出现大幅回撤（>5%）。
-  4. **买入时机**：若满足以上全部条件，在一次放量回踩后以当前价位买入，并设置止损在 4% 以下。
+  1. **Fundamental Screen**: Screen for tokens with market cap $1-10B, requiring month-over-month revenue (or on-chain volume) growth >= 20% over the last 3 months.
+  2. **Quality Filter**: ROE ( or on-chain equivalent metric) >= 15%.
+  3. **Price-Volume Alignment**: Use `get_daily_history` to verify that 7-day volume exceeds 1.3x the 10-day average volume AND no significant drawdown (>5%) has occurred.
+  4. **Entry Timing**: If all conditions are met, enter at current price after a volume-backed pullback, with stop loss set below 4%.
 
-  评分调整：
-  - 完全满足所有条件：sentiment_score +18
-  - 缺失质量指标但满足成长与量价：sentiment_score +10
-  - 只满足成长指标：sentiment_score +6
+  Scoring Adjustments:
+  - Fully meets all conditions: sentiment_score +18
+  - Missing quality metric but meets growth and volume-price: sentiment_score +10
+  - Only meets growth metrics: sentiment_score +6

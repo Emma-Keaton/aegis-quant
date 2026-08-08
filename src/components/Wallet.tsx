@@ -4,6 +4,7 @@ import { connectSolana } from "../crypto/solanaConnector";
 import { Link, Wallet as WalletIcon, Shield, Check, ExternalLink, HelpCircle, Eye, Trash2 } from "lucide-react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { useTonConnectUI } from "@tonconnect/ui-react";
 import WalletConnectUI from "./WalletConnectUI";
 import { UserState } from "../types";
 
@@ -36,6 +37,7 @@ export default function Wallet({
   const [connectionSuccess, setConnectionSuccess] = useState<boolean>(false);
 
   const { openConnectModal } = useConnectModal();
+  const [tonConnectUI] = useTonConnectUI();
 
   const currency = userState.currency || "USD";
   const nairaRate = userState.nairaRate || 1520;
@@ -48,14 +50,14 @@ export default function Wallet({
     return `$${usdAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  const handleSimulateNativeConnect = () => {
-    setSimulatedConnecting(true);
-    setTimeout(() => {
-      onConnectWallet("TON", "UQAzf88d7H6kR39_TqW7Lp93mJ21_z_Xy89Yd");
-      setSimulatedConnecting(false);
+  const handleTonConnect = async () => {
+    try {
+      await tonConnectUI.connectWallet();
+      // TonConnectUI handles the UI modal; after success we refresh state
       setConnectionSuccess(true);
-      setTimeout(() => setConnectionSuccess(false), 3000);
-    }, 1500);
+    } catch (e) {
+      console.error('TON connect failed', e);
+    }
   };
 
   const handleConnectEVM = async () => {
@@ -234,7 +236,7 @@ export default function Wallet({
             <p className="text-xs text-zinc-400">Native, instant integration with TON wallet on Telegram ecosystem.</p>
             <button
               disabled={simulatedConnecting}
-              onClick={handleSimulateNativeConnect}
+              onClick={handleTonConnect}
               className="w-full bg-[#c6ff34] text-[#101416] font-bold text-xs py-3.5 px-4 rounded-xl hover:brightness-110 transition-all uppercase tracking-wider flex items-center justify-center gap-2"
             >
               {simulatedConnecting ? "Authorizing..." : connectionSuccess ? "TON Wallet Connected!" : "CONNECT TON KEEPER / WALLET"}

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createChart, IChartApi, ISeriesApi, UTCTimestamp, AreaSeries, LineSeries } from "lightweight-charts";
 import { Maximize2, Minimize2, X, Info } from "lucide-react";
 import { UserState } from "../types";
+import { apiFetch } from "../api/client";
 
 interface PnLChartProps {
   userState: UserState;
@@ -17,45 +18,6 @@ interface DataPoint {
   time: UTCTimestamp;
   value: number;
 }
-
-// Generate static baseline datasets relative to a 10,000 baseline
-const baseMockData: Record<string, DataPoint[]> = {
-  "1D": [
-    { time: (Math.floor(Date.now() / 1000) - 86400) as UTCTimestamp, value: 12100 },
-    { time: (Math.floor(Date.now() / 1000) - 64800) as UTCTimestamp, value: 12250 },
-    { time: (Math.floor(Date.now() / 1000) - 43200) as UTCTimestamp, value: 11950 },
-    { time: (Math.floor(Date.now() / 1000) - 21600) as UTCTimestamp, value: 12400 },
-    { time: Math.floor(Date.now() / 1000) as UTCTimestamp, value: 12450 }
-  ],
-  "7D": [
-    { time: (Math.floor(Date.now() / 1000) - 7 * 86400) as UTCTimestamp, value: 11500 },
-    { time: (Math.floor(Date.now() / 1000) - 6 * 86400) as UTCTimestamp, value: 11800 },
-    { time: (Math.floor(Date.now() / 1000) - 5 * 86400) as UTCTimestamp, value: 12050 },
-    { time: (Math.floor(Date.now() / 1000) - 4 * 86400) as UTCTimestamp, value: 11900 },
-    { time: (Math.floor(Date.now() / 1000) - 3 * 86400) as UTCTimestamp, value: 12200 },
-    { time: (Math.floor(Date.now() / 1000) - 2 * 86400) as UTCTimestamp, value: 12150 },
-    { time: (Math.floor(Date.now() / 1000) - 1 * 86400) as UTCTimestamp, value: 12380 },
-    { time: Math.floor(Date.now() / 1000) as UTCTimestamp, value: 12450 }
-  ],
-  "30D": [
-    { time: (Math.floor(Date.now() / 1000) - 30 * 86400) as UTCTimestamp, value: 10200 },
-    { time: (Math.floor(Date.now() / 1000) - 25 * 86400) as UTCTimestamp, value: 10800 },
-    { time: (Math.floor(Date.now() / 1000) - 20 * 86400) as UTCTimestamp, value: 11200 },
-    { time: (Math.floor(Date.now() / 1000) - 15 * 86400) as UTCTimestamp, value: 11500 },
-    { time: (Math.floor(Date.now() / 1000) - 10 * 86400) as UTCTimestamp, value: 12100 },
-    { time: (Math.floor(Date.now() / 1000) - 5 * 86400) as UTCTimestamp, value: 12050 },
-    { time: Math.floor(Date.now() / 1000) as UTCTimestamp, value: 12450 }
-  ],
-  "ALL": [
-    { time: (Math.floor(Date.now() / 1000) - 90 * 86400) as UTCTimestamp, value: 8500 },
-    { time: (Math.floor(Date.now() / 1000) - 75 * 86400) as UTCTimestamp, value: 9200 },
-    { time: (Math.floor(Date.now() / 1000) - 60 * 86400) as UTCTimestamp, value: 9900 },
-    { time: (Math.floor(Date.now() / 1000) - 45 * 86400) as UTCTimestamp, value: 10800 },
-    { time: (Math.floor(Date.now() / 1000) - 30 * 86400) as UTCTimestamp, value: 11500 },
-    { time: (Math.floor(Date.now() / 1000) - 15 * 86400) as UTCTimestamp, value: 12000 },
-    { time: Math.floor(Date.now() / 1000) as UTCTimestamp, value: 12450 }
-  ]
-};
 
 export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -73,9 +35,32 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
 
   const [timeframe, setTimeframe] = useState<string>("7D");
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [chartData, setChartData] = useState<DataPoint[]>([]);
+  const [chartError, setChartError] = useState<string | null>(null);
 
   const currency = userState.currency || "USD";
   const nairaRate = userState.nairaRate || 1520;
+
+  // Fetch real portfolio history data
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const res = await apiFetch(`/api/portfolio/history?range=${timeframe}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.status === "ok" && json.data) {
+            setChartData(json.data);
+            setChartError(null);
+          } else {
+            setChartError("No data available");
+          }
+        }
+      } catch {
+        setChartError("Failed to load chart data");
+      }
+    };
+    fetchData();
+  }, [timeframe]);
 
   // Render Inline Chart
   useEffect(() => {
@@ -158,7 +143,7 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
       height: Math.min(window.innerHeight - 180, 500),
       layout: {
         background: { color: "#171717" },
-        textColor: "#e4e4e7", // Brighter label colors for full screen readability
+        textColor: "#e4e4e7",
         fontSize: 11,
       },
       grid: {
@@ -222,18 +207,14 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
     };
   }, [isFullscreen]);
 
-  // Sync data and currency-switched values across both chart instances
+  // Sync data across both chart instances
   useEffect(() => {
     const scale = currency === "NGN" ? nairaRate : 1;
-    const rawData = baseMockData[timeframe] || baseMockData["7D"];
-
-    // Format Data
-    const mappedData = rawData.map((d) => ({
+    const mappedData = chartData.map((d) => ({
       time: d.time,
       value: Math.round(d.value * scale * 100) / 100,
     }));
 
-    // Setup formatters
     const priceFormatter = (val: number) => {
       if (currency === "NGN") {
         return `₦${val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
@@ -242,7 +223,7 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
     };
 
     // Update Inline Chart Series
-    if (inlineSeriesRef.current && inlineChartRef.current) {
+    if (inlineSeriesRef.current) {
       inlineSeriesRef.current.setData(mappedData);
       inlineSeriesRef.current.applyOptions({
         priceFormat: {
@@ -252,11 +233,13 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
           formatter: priceFormatter,
         }
       });
-      inlineChartRef.current.timeScale().fitContent();
+      if (inlineChartRef.current) {
+        inlineChartRef.current.timeScale().fitContent();
+      }
     }
 
     // Update Fullscreen Chart Series
-    if (fullscreenSeriesRef.current && fullscreenChartRef.current) {
+    if (fullscreenSeriesRef.current) {
       fullscreenSeriesRef.current.setData(mappedData);
       fullscreenSeriesRef.current.applyOptions({
         priceFormat: {
@@ -266,33 +249,32 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
           formatter: priceFormatter,
         }
       });
-      fullscreenChartRef.current.timeScale().fitContent();
+      if (fullscreenChartRef.current) {
+        fullscreenChartRef.current.timeScale().fitContent();
+      }
     }
 
     // Render Backtest Overlay on Inline Chart
     if (inlineChartRef.current) {
       if (backtestResult && backtestResult.active && backtestResult.backtestCurve?.length > 0) {
-        // Create backtest series if not exists
         if (!inlineBacktestSeriesRef.current) {
           inlineBacktestSeriesRef.current = inlineChartRef.current.addSeries(LineSeries, {
-            color: "#14b8a6", // Neon Teal
+            color: "#14b8a6",
             lineWidth: 2.5,
-            lineStyle: 2, // Dashed
+            lineStyle: 2,
           });
         }
-        // Set data
         const bData = backtestResult.backtestCurve.map((d: any) => ({
           time: d.time as UTCTimestamp,
           value: Math.round(d.value * scale * 100) / 100,
         }));
         inlineBacktestSeriesRef.current.setData(bData);
 
-        // Create benchmark series if not exists
         if (!inlineBenchmarkSeriesRef.current && backtestResult.benchmarkCurve?.length > 0) {
           inlineBenchmarkSeriesRef.current = inlineChartRef.current.addSeries(LineSeries, {
-            color: "#f59e0b", // Amber / Orange
+            color: "#f59e0b",
             lineWidth: 1.5,
-            lineStyle: 3, // Dotted
+            lineStyle: 3,
           });
         }
         if (inlineBenchmarkSeriesRef.current && backtestResult.benchmarkCurve?.length > 0) {
@@ -304,7 +286,6 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
         }
         inlineChartRef.current.timeScale().fitContent();
       } else {
-        // Remove them if not active
         if (inlineBacktestSeriesRef.current) {
           inlineChartRef.current.removeSeries(inlineBacktestSeriesRef.current);
           inlineBacktestSeriesRef.current = null;
@@ -358,7 +339,15 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
         }
       }
     }
-  }, [timeframe, currency, nairaRate, isFullscreen, backtestResult]);
+  }, [timeframe, currency, nairaRate, isFullscreen, backtestResult, chartData]);
+
+  if (chartError) {
+    return (
+      <div className="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-4 text-center">
+        <p className="text-xs text-zinc-500">{chartError}</p>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -370,7 +359,6 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
           </div>
           
           <div className="flex items-center gap-2">
-            {/* Timeframe Selectors */}
             <div className="flex bg-zinc-900/60 p-1 rounded-xl border border-zinc-800">
               {["1D", "7D", "30D", "ALL"].map((tf) => (
                 <button
@@ -387,7 +375,6 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
               ))}
             </div>
 
-            {/* Maximize to full-screen mode */}
             <button
               onClick={() => setIsFullscreen(true)}
               className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer"
@@ -403,11 +390,9 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
         </div>
       </div>
 
-      {/* Fullscreen Overlay Modal (Responsive Mobile Mode) */}
+      {/* Fullscreen Overlay Modal */}
       {isFullscreen && (
         <div className="fixed inset-0 z-50 bg-[#171717] flex flex-col p-5 md:p-8 animate-fade-in overflow-hidden justify-between">
-          
-          {/* Header Controls */}
           <div className="flex justify-between items-start gap-4 mb-4">
             <div>
               <span className="text-[11px] font-black text-[#c6ff34] uppercase tracking-widest block">AEGIS QUANT</span>
@@ -426,7 +411,6 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
             </button>
           </div>
 
-          {/* Interactive Chart Area */}
           <div className="flex-1 flex flex-col justify-center bg-zinc-950/40 border border-zinc-800 rounded-3xl p-4 md:p-6 my-2">
             <div className="flex justify-between items-center mb-4">
               <div className="flex items-center gap-1.5 text-zinc-400 font-bold text-xs">
@@ -434,7 +418,6 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
                 <span className="text-[11px]">Pinch to Zoom • Drag with Touch to Scroll/Pan</span>
               </div>
 
-              {/* Modal Timeframe Selectors */}
               <div className="flex bg-zinc-900 p-1 rounded-xl border border-zinc-800">
                 {["1D", "7D", "30D", "ALL"].map((tf) => (
                   <button
@@ -457,7 +440,6 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
             </div>
           </div>
 
-          {/* Bottom stats/metadata info bar */}
           <div className="mt-4 flex flex-col sm:flex-row justify-between items-center border-t border-zinc-900 pt-4 gap-3 text-center sm:text-left">
             <div>
               <p className="text-[10px] text-zinc-500 uppercase font-black">ACTIVE INTEGRATIONS</p>
@@ -470,7 +452,6 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
               </p>
             </div>
           </div>
-
         </div>
       )}
     </>

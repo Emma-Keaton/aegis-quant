@@ -203,22 +203,23 @@ class KronosService:
 
         url = f"{settings.KRONOS_SERVICE_URL.rstrip('/')}/forecast"
         headers = {}
-        if False:  # Removed: Kronos uses HF models, no API key
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                url,
-                json={"closes": closes, "horizon": horizon, "samples": samples},
-                headers=headers,
+        # Removed: Kronos uses HF models, no API key required
+        if settings.KRONOS_SERVICE_URL:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    url,
+                    json={"closes": closes, "horizon": horizon, "samples": samples},
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            return ForecastResult(
+                trajectories=data.get("trajectories", []),
+                mean_path=data.get("mean_path", []),
+                confidence_90=data.get("confidence_90", []),
+                confidence=data.get("confidence", 50),
+                metadata=data.get("metadata", {"model_source": "remote"}),
             )
-            resp.raise_for_status()
-            data = resp.json()
-        return ForecastResult(
-            trajectories=data.get("trajectories", []),
-            mean_path=data.get("mean_path", []),
-            confidence_90=data.get("confidence_90", []),
-            confidence=data.get("confidence", 50),
-            metadata=data.get("metadata", {"model_source": "remote"}),
-        )
             
     async def _model_forecast(self, closes: List[float], horizon: int, samples: int) -> ForecastResult:
         """Run inference using Kronos model."""

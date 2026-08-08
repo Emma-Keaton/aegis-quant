@@ -1,0 +1,10 @@
+{
+  "url": "https://aegis-quant.vercel.app",
+  "name": "Aegis Quant",
+  "description": "AI-Powered Crypto Trading Platform",
+  "icons": [
+    "https://aegis-quant.vercel.app/icons/icon-192x192.png",
+    "https://aegis-quant.vercel.app/icons/icon-512x512.png"
+  ],
+  "aboutUrl": ""
+}

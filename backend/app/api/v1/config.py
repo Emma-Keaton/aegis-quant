@@ -25,5 +25,7 @@ async def get_config():
             "projectId": s.WALLET_CONNECT_PROJECT_ID or None,
         },
         "frontendUrl": s.APP_URL or None,
+        "grafanaUrl": s.GRAFANA_URL or None,
+        "prometheusUrl": f"{s.API_PUBLIC_URL}/metrics" if s.API_PUBLIC_URL else None,
         "kronosUrl": s.KRONOS_SERVICE_URL or None,
     }

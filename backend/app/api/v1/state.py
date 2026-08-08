@@ -205,6 +205,26 @@ async def get_state(
     paper_bal = bal_result.scalar_one_or_none()
     balance = float(paper_bal.balance) if paper_bal else 124.50
     
+    # Calculate unrealized PnL from open positions
+    pos_result = await db.execute(
+        select(Position).where(Position.profile_id == profile.id).where(Position.is_closed == False)
+    )
+    open_positions = pos_result.scalars().all()
+    total_unrealized = sum(float(p.unrealized_pnl or 0) for p in open_positions)
+    portfolioValue = balance + total_unrealized
+    
+    # Today's PnL from trade logs
+    from datetime import timedelta
+    today_start = datetime.now(timezone.utc) - timedelta(days=1)
+    trades_result = await db.execute(
+        select(func.sum(TradeLog.total_value_usd)).where(
+            TradeLog.profile_id == profile.id,
+            TradeLog.executed_at >= today_start
+        )
+    )
+    dailyProfitLoss = float(trades_result.scalar() or 0)
+    pnlPercentage = (dailyProfitLoss / balance * 100) if balance > 0 else 0
+    
     naira_rate = await _fetch_naira_rate()
     
     return {
@@ -214,9 +234,9 @@ async def get_state(
             walletAddress=profile.wallet_address if hasattr(profile, 'wallet_address') else None,
             network=profile.wallet_network if hasattr(profile, 'wallet_network') else "TON",
             balance=balance,
-            portfolioValue=balance * 1.5,  # rough estimate
-            dailyProfitLoss=52.0,
-            pnlPercentage=14.2,
+            portfolioValue=portfolioValue,
+            dailyProfitLoss=dailyProfitLoss,
+            pnlPercentage=round(pnlPercentage, 2),
             agentActive=profile.bot_enabled,
             riskLimit=float(profile.max_allocation_pct),
             tradeMode=profile.trading_mode.value if hasattr(profile.trading_mode, 'value') else str(profile.trading_mode),

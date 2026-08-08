@@ -49,3 +49,6 @@ base58
 
 # Monitoring
 prometheus-client
+
+# AI Services
+groq>=0.4.0

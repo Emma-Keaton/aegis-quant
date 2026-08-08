@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
 
+    # Groq / LLM
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.1-70b-versatile"
+
     # Scraper Accounts
     TWITTER_ACCOUNTS_JSON: str = "[]"
     TELEGRAM_API_ID: int = 0
@@ -127,6 +131,10 @@ class Settings(BaseSettings):
     # Rate limiting
     RATE_LIMIT_REQUESTS: int = 60
     RATE_LIMIT_WINDOW: int = 60
+    
+    # Prometheus / Grafana
+    GRAFANA_URL: str = ""
+    PROMETHEUS_METRICS_PORT: int = 9090
     
     # Execution
     AUTO_CONFIDENCE_THRESHOLD: int = 75

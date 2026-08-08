@@ -1,8 +1,26 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import CopyTradeManager from "./CopyTradeManager";
-import { Zap, RefreshCw, Radio, Sparkles, MessageSquare, Flame } from "lucide-react";
-import { MarketSignal } from "../types";
-import apiFetch from "../api/client";
+import { Zap, RefreshCw, Radio, Sparkles, MessageSquare, Flame, Plus, Trash2, CheckCircle, XCircle } from "lucide-react";
+import { MarketSignal, AlertRule } from "../types";
+import { apiFetch, apiJson } from "../api/client";
+
+interface Source {
+  id: string;
+  name: string;
+  source_type: string;
+  url_or_handle: string;
+  priority: number;
+  enabled: boolean;
+  is_default: boolean;
+}
+
+interface SourcesResponse {
+  sources: Source[];
+  total: number;
+  baseline_count: number;
+  user_count: number;
+}
 
 interface IntelProps {
   onActivateAgent: (ticker: string, size: number) => void;
@@ -10,69 +28,103 @@ interface IntelProps {
 }
 
 export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
-  const [signals, setSignals] = useState<MarketSignal[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [scanningStatus, setScanningStatus] = useState<string>("Scanning Reddit, RSS, & News...");
-  const [activeSourceIndex, setActiveSourceIndex] = useState<number>(0);
+  const queryClient = useQueryClient();
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [showAddSource, setShowAddSource] = useState(false);
+  const [newSource, setNewSource] = useState({ name: "", type: "rss", url: "", priority: 5 });
 
-  const sources = [
-    "Source: r/cryptocurrency [Active]",
-    "Source: CoinDesk API [Connected]",
-    "Source: Twitter Firehose [Awaiting...]",
-    "Source: r/solana [Analyzing]",
-    "Source: Telegram Whale Watcher [Active]"
-  ];
-
-  const fetchSignals = async (showLoading = true) => {
-    if (showLoading) setLoading(true);
-    setError(null);
-    try {
+  // Fetch signals from backend
+  const { data: signalsData, isLoading, error, refetch } = useQuery({
+    queryKey: ["signals"],
+    queryFn: async () => {
       const res = await apiFetch("/api/signals");
-      if (!res.ok) {
-        throw new Error("Failed to fetch market signals");
-      }
+      if (!res.ok) throw new Error("Failed to fetch signals");
       const json = await res.json();
-      if (json.status === "success" && json.data) {
-        setSignals(json.data);
-      } else {
-        throw new Error("Invalid format returned by market scanner");
+      return json.signals || [];
+    },
+  });
+
+  // Fetch user sources
+  const { data: sourcesData, isLoading: sourcesLoading } = useQuery({
+    queryKey: ["sources"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/sources/combined");
+      if (!res.ok) throw new Error("Failed to fetch sources");
+      return res.json() as Promise<SourcesResponse>;
+    },
+  });
+
+  // Sync engine B + Groq to generate new signals
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch("/api/signals/sync", { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Sync failed" }));
+        throw new Error(err.error || "Sync failed");
       }
-    } catch (err: any) {
-      setError(err.message || "Unknown error occurred during market scanning");
-    } finally {
-      if (showLoading) setLoading(false);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["signals"] });
+      setLastSync(new Date().toLocaleTimeString());
+    },
+  });
+
+  const handleRescan = () => {
+    setSyncing(true);
+    syncMutation.mutateAsync()
+      .catch((err: any) => console.error("Sync failed:", err))
+      .finally(() => setSyncing(false));
+  };
+
+  const handleAddSource = async () => {
+    if (!newSource.name || !newSource.url) return;
+    try {
+      await apiJson("/api/sources/my", {
+        method: "POST",
+        body: JSON.stringify({
+          name: newSource.name,
+          source_type: newSource.type,
+          url_or_handle: newSource.url,
+          priority: newSource.priority,
+        }),
+      });
+      setNewSource({ name: "", type: "rss", url: "", priority: 5 });
+      setShowAddSource(false);
+      queryClient.invalidateQueries({ queryKey: ["sources"] });
+    } catch (err) {
+      console.error("Failed to add source:", err);
     }
   };
 
-  useEffect(() => {
-    fetchSignals();
-
-    // Rotate active source indicator in scanner-effect
-    const interval = setInterval(() => {
-      setActiveSourceIndex((prev) => (prev + 1) % sources.length);
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleRescan = () => {
-    setScanningStatus("Scraping social clusters...");
-    setLoading(true);
-    setTimeout(() => {
-      setScanningStatus("Routing vectors to Kronos microservice...");
-      setTimeout(() => {
-        fetchSignals(false);
-        setScanningStatus("Scanning Reddit, RSS, & News...");
-        setLoading(false);
-      }, 8000); // 1.5s total loading simulation
-    }, 1000);
+  const handleDeleteSource = async (sourceId: string) => {
+    try {
+      await apiFetch(`/api/sources/my/${sourceId}`, { method: "DELETE" });
+      queryClient.invalidateQueries({ queryKey: ["sources"] });
+    } catch (err) {
+      console.error("Failed to delete source:", err);
+    }
   };
 
+  const handleToggleSource = async (source: Source) => {
+    try {
+      await apiFetch(`/api/sources/my/${source.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled: !source.enabled }),
+      });
+      queryClient.invalidateQueries({ queryKey: ["sources"] });
+    } catch (err) {
+      console.error("Failed to toggle source:", err);
+    }
+  };
+
+  const signals: MarketSignal[] = signalsData || [];
+  const sources: Source[] = sourcesData?.sources || [];
+
   const handleActivate = (sig: MarketSignal) => {
-    // Default trade size based on ticker or random allocation simulation
-    const simulatedSize = sig.ticker === "$WIF" ? 180.00 : 350.00;
-    onActivateAgent(sig.ticker.replace("$", ""), simulatedSize);
+    const ticker = sig.ticker.replace("$", "");
+    onActivateAgent(ticker, 100);
   };
 
   return (
@@ -85,48 +137,145 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
         </div>
         <button
           onClick={handleRescan}
-          disabled={loading}
+          disabled={syncing || networkOffline}
           className="text-zinc-400 hover:text-[#c6ff34] p-2 hover:bg-zinc-900 rounded-full transition-all flex items-center gap-1.5 text-xs font-bold font-mono"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          {loading ? "SCANNING" : "RESCAN"}
+          <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
+          {syncing ? "SYNCING" : lastSync ? `LAST: ${lastSync}` : "SYNC"}
         </button>
       </div>
 
-      {/* Live Market scanner active widget */}
+      {/* Sources Panel */}
       <div className="space-y-3">
         <div className="flex justify-between items-center">
-          <span className="text-xs uppercase tracking-widest text-zinc-400 font-bold px-1">SIGNAL ANALYSIS HUB</span>
-          <span className="flex items-center gap-1 text-[10px] font-bold text-[#c6ff34]">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#c6ff34] opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#c6ff34]"></span>
-            </span>
-            LIVE FEED
-          </span>
+          <span className="text-xs uppercase tracking-widest text-zinc-400 font-bold px-1">WATCHED SOURCES</span>
+          <button
+            onClick={() => setShowAddSource(!showAddSource)}
+            className="text-[10px] text-[#c6ff34] hover:text-white px-2 py-1 rounded border border-[#c6ff34]/30 hover:border-[#c6ff34] transition-all flex items-center gap-1"
+          >
+            <Plus className="w-3 h-3" /> ADD SOURCE
+          </button>
         </div>
 
-        {/* Scanner border animation effect container */}
-        <div className="relative overflow-hidden bg-[#1c2023] border border-zinc-800 p-4 rounded-xl flex items-center gap-4">
-          <div className="flex items-center justify-center bg-zinc-950 h-10 w-10 rounded-lg border border-zinc-800">
-            <RefreshCw className="w-5 h-5 text-[#c6ff34] animate-spin" style={{ animationDuration: "5s" }} />
+        {/* Add Source Form */}
+        {showAddSource && (
+          <div className="bg-[#1c2023] border border-[#c6ff34]/30 p-4 rounded-xl space-y-3 animate-fadeIn">
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                type="text"
+                placeholder="Source name (e.g. Whale Alert)"
+                value={newSource.name}
+                onChange={e => setNewSource(p => ({ ...p, name: e.target.value }))}
+                className="bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 placeholder-zinc-600 focus:outline-none focus:border-[#c6ff34]"
+              />
+              <select
+                value={newSource.type}
+                onChange={e => setNewSource(p => ({ ...p, type: e.target.value }))}
+                className="bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 focus:outline-none focus:border-[#c6ff34]"
+              >
+                <option value="rss">RSS Feed</option>
+                <option value="telegram">Telegram Channel</option>
+                <option value="twitter">Twitter/X</option>
+                <option value="reddit">Reddit</option>
+                <option value="onchain">On-Chain</option>
+              </select>
+            </div>
+            <input
+              type="text"
+              placeholder="URL or handle (e.g. @CryptoWhale or https://example.com/rss)"
+              value={newSource.url}
+              onChange={e => setNewSource(p => ({ ...p, url: e.target.value }))}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 placeholder-zinc-600 focus:outline-none focus:border-[#c6ff34]"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowAddSource(false)}
+                className="text-xs text-zinc-400 hover:text-white px-3 py-1.5 rounded-lg transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddSource}
+                disabled={!newSource.name || !newSource.url}
+                className="bg-[#c6ff34] text-black text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-[#b0f020] transition-all disabled:opacity-50"
+              >
+                Add Source
+              </button>
+            </div>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-white italic truncate">
-              🕒 {scanningStatus}
-            </p>
-            <p className="text-[10px] text-[#8d947a] font-bold mt-1 font-mono uppercase tracking-wider transition-all">
-              {sources[activeSourceIndex]}
-            </p>
-          </div>
+        )}
+
+        {/* Sources List */}
+        <div className="bg-[#1c2023] border border-zinc-800 rounded-xl p-4 space-y-2">
+          {sourcesLoading ? (
+            <p className="text-xs text-zinc-500 text-center py-4">Loading sources...</p>
+          ) : sources.length === 0 ? (
+            <p className="text-xs text-zinc-500 text-center py-4">No sources configured. Add RSS feeds, Telegram channels, or Twitter accounts.</p>
+          ) : (
+            sources.map((src) => (
+              <div
+                key={src.id}
+                className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
+                  src.enabled
+                    ? "border-zinc-700 bg-zinc-900/50"
+                    : "border-zinc-800 bg-zinc-950/30 opacity-60"
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  {src.enabled ? (
+                    <CheckCircle className="w-4 h-4 text-[#c6ff34] shrink-0" />
+                  ) : (
+                    <XCircle className="w-4 h-4 text-zinc-600 shrink-0" />
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white truncate">{src.name}</p>
+                    <p className="text-[10px] text-zinc-500 font-mono truncate">{src.url_or_handle}</p>
+                  </div>
+                  <span className="text-[9px] uppercase font-bold text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded shrink-0">
+                    {src.source_type}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {!src.is_default && (
+                    <>
+                      <button
+                        onClick={() => handleToggleSource(src)}
+                        className={`text-xs px-2 py-1 rounded transition-all ${
+                          src.enabled
+                            ? "text-[#c6ff34] hover:bg-[#c6ff34]/10"
+                            : "text-zinc-500 hover:text-zinc-300"
+                        }`}
+                      >
+                        {src.enabled ? "ON" : "OFF"}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteSource(src.id)}
+                        className="text-zinc-500 hover:text-red-400 p-1 rounded transition-all"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
+                  {src.is_default && (
+                    <span className="text-[9px] text-zinc-600 font-mono">DEFAULT</span>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
-      {/* Identified opportunities header */}
+      {/* Signals Section */}
       <div className="space-y-3">
-        <p className="text-xs uppercase tracking-wider text-zinc-400 font-bold px-1">IDENTIFIED OPPORTUNITIES</p>
+        <div className="flex justify-between items-center">
+          <p className="text-xs uppercase tracking-wider text-zinc-400 font-bold px-1">IDENTIFIED OPPORTUNITIES</p>
+          {lastSync && (
+            <span className="text-[10px] text-zinc-500 font-mono">Updated: {lastSync}</span>
+          )}
+        </div>
 
-        {loading && signals.length === 0 ? (
+        {isLoading && signals.length === 0 ? (
           <div className="space-y-3">
             {[1, 2].map((i) => (
               <div key={i} className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-5 space-y-4 animate-pulse">
@@ -146,10 +295,22 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
           <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-xl text-center space-y-2">
             <p className="text-xs font-bold text-red-400">{error}</p>
             <button
-              onClick={() => fetchSignals()}
+              onClick={() => refetch()}
               className="text-xs text-white underline hover:text-[#c6ff34]"
             >
-              Try Scanning Again
+              Try Again
+            </button>
+          </div>
+        ) : signals.length === 0 ? (
+          <div className="bg-zinc-900/30 border border-dashed border-zinc-800 p-8 rounded-2xl text-center space-y-2">
+            <p className="text-sm font-bold text-zinc-400">No Active Signals</p>
+            <p className="text-xs text-zinc-600">Click SYNC to scan configured sources for trading opportunities.</p>
+            <button
+              onClick={handleRescan}
+              disabled={syncing || networkOffline}
+              className="mt-2 bg-[#c6ff34] text-black text-xs font-bold px-4 py-2 rounded-lg hover:bg-[#b0f020] transition-all disabled:opacity-50"
+            >
+              {syncing ? "Scanning..." : "SCAN NOW"}
             </button>
           </div>
         ) : (
@@ -157,7 +318,7 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
             {signals.map((sig, idx) => {
               const confidence = sig.confidence || 80;
               return (
-                <div 
+                <div
                   key={idx}
                   className="bg-[#1c2023] border border-zinc-800 rounded-2xl overflow-hidden flex flex-col group hover:border-[#c6ff34]/40 transition-all duration-300"
                 >
@@ -186,8 +347,8 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
                         </p>
                       </div>
                       <div className="space-y-0.5">
-                        <p className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">MENTIONS / DENSITY</p>
-                        <p className="text-xs font-extrabold text-[#c6ff34]">{sig.metric}</p>
+                        <p className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">CONFIDENCE</p>
+                        <p className="text-xs font-extrabold text-[#c6ff34]">{confidence}%</p>
                       </div>
                     </div>
 
@@ -195,7 +356,7 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
                     <div className="bg-zinc-950 p-3 rounded-xl border-l-2 border-[#c6ff34] space-y-1">
                       <div className="flex items-center gap-1 text-[9px] font-black text-[#c6ff34] uppercase tracking-widest">
                         <Sparkles className="w-3 h-3 fill-[#c6ff34] text-[#c6ff34]" />
-                        <span>AI Output</span>
+                        <span>AI Analysis</span>
                       </div>
                       <p className="text-xs text-zinc-300 font-medium leading-relaxed italic">
                         "{sig.analysis}"
@@ -203,11 +364,12 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
                     </div>
                   </div>
 
-                  {/* Immediate Activation Bottom Button Area */}
+                  {/* Activation Button */}
                   <div className="px-5 pb-5 pt-1 bg-zinc-950/20">
                     <button
                       onClick={() => handleActivate(sig)}
-                      className="w-full bg-[#c6ff34] text-[#101416] font-black text-xs py-3.5 px-4 rounded-xl flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all hover:brightness-110"
+                      disabled={networkOffline}
+                      className="w-full bg-[#c6ff34] text-[#101416] font-black text-xs py-3.5 px-4 rounded-xl flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Zap className="w-3.5 h-3.5 fill-current" />
                       {sig.actionLabel}
@@ -221,15 +383,14 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
       </div>
 
       <CopyTradeManager />
-      {/* Decorative convergence analytics block from design specs */}
-      <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-5 relative overflow-hidden h-32 flex flex-col justify-end">
+      
+      {/* Decorative convergence analytics block */}
+      <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-transparent z-10"></div>
-        {/* Subtle grid accent background */}
         <div className="absolute inset-0 opacity-10 pointer-events-none bg-[radial-gradient(#c6ff34_1px,transparent_1px)] [background-size:12px_12px]"></div>
-        
-        <div className="relative z-20 space-y-0.5">
+        <div className="relative z-20 space-y-1">
           <p className="text-xs font-black uppercase text-[#c6ff34] tracking-widest">Global Signal Convergence</p>
-          <p className="text-[10px] text-zinc-400 font-medium">Multi-chain sentiment clusters and social matrix analysis processed in real-time.</p>
+          <p className="text-[10px] text-zinc-400 font-medium">Multi-chain sentiment clusters and social matrix analysis processed via Engine B + Groq.</p>
         </div>
       </div>
     </div>

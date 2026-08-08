@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Shield, ShieldAlert, Zap, RefreshCw, LogOut, Activity, TrendingUp, TrendingDown, AlertCircle, Clock } from "lucide-react";
-import { apiJson } from "../api/client";
+import { apiJson, getApiBase } from "../api/client";
 
 interface AdminDashboardProps {
   onLogout: () => void;
@@ -16,12 +16,30 @@ interface MetricsData {
   uptime_hours: number;
 }
 
+interface AppConfig {
+  grafanaUrl: string | null;
+  prometheusUrl: string | null;
+  frontendUrl: string | null;
+}
+
 export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [shutdownConfirmed, setShutdownConfirmed] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState<{ status?: string; message?: string }>({});
   const [metrics, setMetrics] = useState<MetricsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"monitoring" | "system">("monitoring");
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
+
+  useEffect(() => {
+    fetch(`${getApiBase()}/api/config`, { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setAppConfig(data))
+      .catch(() => {});
+
+    loadMetrics();
+    const interval = setInterval(loadMetrics, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const loadMetrics = async () => {
     try {
@@ -33,12 +51,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    loadMetrics();
-    const interval = setInterval(loadMetrics, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   const handleShutdown = async () => {
     try {
@@ -70,8 +82,11 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     );
   }
 
+  const grafanaUrl = appConfig?.grafanaUrl || "";
+  const prometheusUrl = appConfig?.prometheusUrl || `${appConfig?.frontendUrl || window.location.origin}/metrics`;
+
   return (
-    <div className="space-y-6 pb-24 font-sans">
+    <div className="space-y-6 pb-6 font-sans p-4">
       {/* Header */}
       <div className="flex justify-between items-center h-16 border-b border-zinc-800 px-1">
         <div className="flex items-center gap-3">
@@ -84,7 +99,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-zinc-800 px-1">
+      <div className="flex gap-2 border-b border-zinc-800">
         <button
           onClick={() => setActiveTab("monitoring")}
           className={`px-4 py-2 font-bold text-sm uppercase tracking-wider ${
@@ -108,16 +123,16 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         <div className="space-y-6">
           {/* Metrics Grid */}
           <div className="grid grid-cols-2 gap-4">
-            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
-              <div className="flex items-center gap-2 mb-2">
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-3">
                 <Activity className="w-5 h-5 text-[#c6ff34]" />
                 <span className="text-xs font-bold text-zinc-400 uppercase">Trades Today</span>
               </div>
               <p className="text-3xl font-black text-white">{metrics?.trades_today || 0}</p>
             </div>
             
-            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
-              <div className="flex items-center gap-2 mb-2">
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-3">
                 {metrics?.pnl_usd >= 0 ? <TrendingUp className="w-5 h-5 text-green-400" /> : <TrendingDown className="w-5 h-5 text-red-400" />}
                 <span className="text-xs font-bold text-zinc-400 uppercase">PnL Today</span>
               </div>
@@ -126,32 +141,32 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               </p>
             </div>
 
-            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
-              <div className="flex items-center gap-2 mb-2">
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-3">
                 <Shield className="w-5 h-5 text-blue-400" />
                 <span className="text-xs font-bold text-zinc-400 uppercase">Open Positions</span>
               </div>
               <p className="text-3xl font-black text-white">{metrics?.open_positions || 0}</p>
             </div>
 
-            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
-              <div className="flex items-center gap-2 mb-2">
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-3">
                 <AlertCircle className="w-5 h-5 text-yellow-400" />
                 <span className="text-xs font-bold text-zinc-400 uppercase">Errors (24h)</span>
               </div>
               <p className="text-3xl font-black text-white">{metrics?.errors_total || 0}</p>
             </div>
 
-            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
-              <div className="flex items-center gap-2 mb-2">
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-3">
                 <TrendingUp className="w-5 h-5 text-[#c6ff34]" />
                 <span className="text-xs font-bold text-zinc-400 uppercase">Win Rate</span>
               </div>
               <p className="text-3xl font-black text-[#c6ff34]">{metrics?.win_rate_pct || 0}%</p>
             </div>
 
-            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4">
-              <div className="flex items-center gap-2 mb-2">
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-3">
                 <Clock className="w-5 h-5 text-purple-400" />
                 <span className="text-xs font-bold text-zinc-400 uppercase">Uptime</span>
               </div>
@@ -160,28 +175,29 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           </div>
 
           {/* Grafana Link */}
-          <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
-            <h3 className="text-sm font-bold text-[#c6ff34] uppercase tracking-wider mb-4">📊 Grafana Cloud</h3>
-            <p className="text-xs text-zinc-400 mb-4">
-              View full dashboards, alerts, and historical metrics in Grafana Cloud.
-            </p>
-            <a
-              href="https://grafana.com/products/cloud/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-[#c6ff34] text-black font-bold rounded-xl hover:bg-[#b0f020] transition-all text-sm"
-            >
-              <Activity className="w-4 h-4" />
-              Open Grafana Dashboards
-            </a>
-          </div>
+          {grafanaUrl && (
+            <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
+              <h3 className="text-sm font-bold text-[#c6ff34] uppercase tracking-wider mb-4">📊 Grafana Cloud</h3>
+              <p className="text-xs text-zinc-400 mb-4">
+                View full dashboards, alerts, and historical metrics in Grafana Cloud.
+              </p>
+              <a
+                href={grafanaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-[#c6ff34] text-black font-bold rounded-xl hover:bg-[#b0f020] transition-all text-sm"
+              >
+                <Activity className="w-4 h-4" /> Open Grafana Dashboards
+              </a>
+            </div>
+          )}
 
           {/* Prometheus Endpoint */}
           <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6">
             <h3 className="text-sm font-bold text-zinc-300 uppercase tracking-wider mb-2">📈 Prometheus Endpoint</h3>
             <p className="text-xs text-zinc-500 mb-3">Raw metrics for scraping:</p>
             <code className="block bg-black/50 p-3 rounded-lg text-xs text-[#c6ff34] font-mono break-all">
-              https://your-backend.onrender.com/metrics
+              {prometheusUrl}
             </code>
           </div>
         </div>

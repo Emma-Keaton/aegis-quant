@@ -1,7 +1,7 @@
 """Market signals endpoint — integrates Kronos forecasting with database signals.
 
-When no signals exist in the database, Kronos generates real-time signals based
-on local foundation model forecasts (no API key required).
+When no signals exist in the database, Engine B scrapes sources and optionally
+uses Groq/Llama for analysis.
 """
 
 import asyncio
@@ -152,3 +152,54 @@ async def get_signal(
         raise HTTPException(status_code=404, detail="Signal not found")
 
     return SignalResponse.model_validate(signal)
+
+
+@router.post("/sync")
+async def sync_signals(
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Trigger Engine B to scrape all configured sources and generate signals."""
+    from app.engines.engine_b import EngineB
+    from app.services.groq_client import get_groq_client
+
+    profile_result = await db.execute(select(Profile).where(Profile.telegram_id == user["id"]))
+    profile = profile_result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    try:
+        engine_b = EngineB(db_session=db)
+        # Run the engine to generate signals from configured sources
+        signals = await engine_b.run_once()
+
+        # Store signals in database
+        stored = []
+        for sig in signals:
+            signal = Signal(
+                engine="B",
+                ticker=sig.ticker,
+                category="social",
+                badge=f"{int(abs(sig.sentiment) * 100)}% SENTIMENT",
+                source=sig.source,
+                metric=f"{sig.volume} mentions",
+                analysis=sig.raw_text[:200] if sig.raw_text else "",
+                confidence=int((sig.sentiment + 1) * 50),  # Map -1..1 to 0..100
+                action_label=f"ACTIVATE AGENT FOR {sig.ticker}",
+                sentiment_score=sig.sentiment,
+            )
+            db.add(signal)
+            stored.append(signal)
+
+        await db.commit()
+        for s in stored:
+            await db.refresh(s)
+
+        return {
+            "status": "success",
+            "signals_generated": len(stored),
+            "signals": [SignalResponse.model_validate(s).model_dump() for s in stored],
+        }
+    except Exception as e:
+        logger.error(f"Signal sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

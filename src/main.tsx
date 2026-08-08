@@ -6,6 +6,7 @@ import App from './App.tsx';
 import './index.css';
 import { WagmiProvider } from 'wagmi';
 import { RainbowKitProvider } from '@rainbow-me/rainbowkit';
+import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { initWagmi } from './wagmiConfig';
 
 const queryClient = new QueryClient();
@@ -38,11 +39,13 @@ async function renderApp(wagmiConfig: any) {
   _root!.render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <WagmiProvider config={wagmiConfig}>
-          <RainbowKitProvider>
-            <App />
-          </RainbowKitProvider>
-        </WagmiProvider>
+        <TonConnectUIProvider manifestUrl="/tonconnect.json">
+          <WagmiProvider config={wagmiConfig}>
+            <RainbowKitProvider>
+              <App />
+            </RainbowKitProvider>
+          </WagmiProvider>
+        </TonConnectUIProvider>
       </QueryClientProvider>
     </StrictMode>,
   );
@@ -54,7 +57,9 @@ function renderFallback() {
   _root!.render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <App />
+        <TonConnectUIProvider manifestUrl="/tonconnect.json">
+          <App />
+        </TonConnectUIProvider>
       </QueryClientProvider>
     </StrictMode>,
   );

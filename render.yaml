@@ -50,6 +50,8 @@ services:
           envVarName: RENDER_EXTERNAL_URL
       - key: CORS_ORIGINS
         value: https://aegis-quant.vercel.app
+      - key: GRAFANA_URL
+        sync: false
       - key: SESSION_SECRET
         generateValue: true
       - key: REDIS_URL
