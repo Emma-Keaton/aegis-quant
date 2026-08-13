@@ -65,7 +65,7 @@ class MarketDataService:
     async def fetch_ohlcv(
         self,
         symbol: str,
-        exchange_id: str = 'coingecko',
+        exchange_id: str = 'binance',
         timeframe: str = '1m',
         limit: int = 64,
         api_key: str = None,
@@ -137,11 +137,33 @@ class MarketDataService:
 
         except Exception as e:
             logger.warning(f"Market fetch for {normalized_symbol} on {exchange_id} failed: {e}")
-            # Try fallback to CoinGecko
+            # Fallback chain (mirrors market_fetcher): Binance → CoinGecko → Coinlore.
+            if exchange_id != 'binance':
+                try:
+                    binance_sym = self._normalize_symbol(symbol, 'binance')
+                    exchange = await self._get_exchange('binance', api_key, secret)
+                    ohlcv = await exchange.fetch_ohlcv(binance_sym, timeframe, limit=limit)
+                    result = [{
+                        'timestamp': c[0],
+                        'open': c[1],
+                        'high': c[2],
+                        'low': c[3],
+                        'close': c[4],
+                        'volume': c[5]
+                    } for c in ohlcv]
+                    self._cache[cache_key] = (now, result)
+                    return result
+                except Exception as be:
+                    logger.warning(f"Binance fallback failed for {normalized_symbol}: {be}")
+            # Then CoinGecko
             try:
                 return await self._fetch_ohlcv_coingecko(normalized_symbol, timeframe, limit)
-            except:
-                raise MarketDataError(f"Failed to fetch market data for {normalized_symbol}: {e}")
+            except Exception:
+                # Finally Coinlore
+                try:
+                    return await self._fetch_ohlcv_coinlore(normalized_symbol, timeframe, limit)
+                except Exception:
+                    raise MarketDataError(f"Failed to fetch market data for {normalized_symbol}: {e}")
 
     def _normalize_symbol(self, symbol: str, exchange_id: str) -> str:
         """Normalize symbol format for different exchanges."""
@@ -225,48 +247,33 @@ class MarketDataService:
             raise
 
     async def _fetch_ohlcv_coinlore(self, symbol: str, timeframe: str, limit: int) -> List[Dict]:
-        """Fetch OHLCV from Coinlore API (simple ticker data)."""
-        # Coinlore API: https://www.coinlore.com/api/
-        # Format: /api/marketdata/{coin}/{pair}
-        # Returns latest price and 24h stats, not OHLCV candles
-        # Since Coinlore doesn't provide OHLCV, we'll use it as a last-resort fallback
-        # with a simulated candle series based on recent price changes.
+        """Fetch OHLCV from Coinlore API (simple ticker data).
 
-        # This is a fallback only - real OHLCV would come from another source
+        Coinlore does not provide OHLCV candlesticks; fabricating synthetic
+        candles is misleading. Return a single real price point, or [] if the
+        upstream call fails (never invent candle data).
+        """
         try:
-            # Get current price from Coinlore
             coin = symbol.split('/')[0].upper()
             pair = 'USD' if 'USD' in symbol or 'USDT' in symbol else 'USDT'
-
             url = f"https://www.coinlore.com/api/marketdata/{coin}/{pair}"
             res = await self._http_client.get(url, timeout=5)
             res.raise_for_status()
             data = res.json()
-
-            # Extract current price
-            current_price = float(data.get('price', 100.0))
-
-            # Generate synthetic OHLCV candles (mock data for fallback)
-            # In production, this should be replaced with real candle data
-            result = []
+            current_price = float(data.get('price', 0))
+            if current_price <= 0:
+                return []
             now_ts = int(time.time() * 1000)
-            for i in range(limit):
-                # Simulate small random changes around current price
-                change = (i - limit/2) * 0.01  # gradual change
-                price = current_price * (1 + change)
-                result.append({
-                    'timestamp': now_ts - (limit - i) * 60000,  # 1-min candles
-                    'open': round(price, 4),
-                    'high': round(price * 1.001, 4),
-                    'low': round(price * 0.999, 4),
-                    'close': round(price, 4),
-                    'volume': 1000 + i * 10,
-                })
-
-            return result
+            return [{
+                'timestamp': now_ts,
+                'open': current_price,
+                'high': current_price,
+                'low': current_price,
+                'close': current_price,
+                'volume': 0,
+            }]
         except Exception as e:
             logger.warning(f"Coinlore fetch failed: {e}")
-            # Even coinlore failed, return empty
             return []
 
     async def get_ticker(self, symbol: str, exchange_id: str = 'binance') -> Dict:

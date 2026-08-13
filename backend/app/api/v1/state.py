@@ -1,6 +1,7 @@
 """State endpoint — merged from Express server.ts into FastAPI with proper DB persistence."""
 
 import logging
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List
@@ -48,7 +49,7 @@ class UserStateOut(BaseModel):
     riskLimit: float
     tradeMode: str
     currency: str = "USD"
-    nairaRate: float
+    nairaRate: Optional[float] = None
     positions: List[PositionItem] = []
     connectedCeFi: dict = {"bybit": {"connected": False, "encryptedKeys": None}, "okx": {"connected": False, "encryptedKeys": None}, "binance": {"connected": False, "encryptedKeys": None}}
 
@@ -65,6 +66,13 @@ class RiskSettingsOut(BaseModel):
 
 
 # ── Helpers ───────────────────────────────────────────────────────
+
+# Upstream USD/NGN rate cache (avoids hammering the exchange API on every request).
+# There is deliberately NO hardcoded default rate — the live value is fetched
+# upstream, cached here, and refreshed when the cache expires.
+_NAIRA_CACHE: dict = {"rate": None, "fetched_at": 0.0}
+_NAIRA_CACHE_TTL = 3600  # 1 hour
+
 
 async def _get_or_create_profile(telegram_id: int, db: AsyncSession) -> Profile:
     result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
@@ -84,8 +92,18 @@ async def _get_or_create_profile(telegram_id: int, db: AsyncSession) -> Profile:
     return profile
 
 
-async def _fetch_naira_rate() -> float:
-    """Fetch live USD/NGN rate, cached for 1 hour."""
+async def _fetch_naira_rate() -> Optional[float]:
+    """Fetch live USD/NGN rate, cached for 1 hour.
+
+    Returns the previously cached rate if we already have one (even when the
+    upstream call fails), so the UI never snaps back to a hardcoded value.
+    Returns None only when no rate has ever been fetched and upstream is down.
+    """
+    now = time.time()
+    # Serve from cache when fresh.
+    if _NAIRA_CACHE["rate"] is not None and now - _NAIRA_CACHE["fetched_at"] < _NAIRA_CACHE_TTL:
+        return _NAIRA_CACHE["rate"]
+
     try:
         import httpx
         async with httpx.AsyncClient(timeout=5) as client:
@@ -94,10 +112,16 @@ async def _fetch_naira_rate() -> float:
                 data = res.json()
                 rate = data.get("rates", {}).get("NGN")
                 if rate and isinstance(rate, (int, float)):
-                    return round(rate, 2)
+                    rate = round(rate, 2)
+                    _NAIRA_CACHE.update({"rate": rate, "fetched_at": now})
+                    return rate
     except Exception:
         pass
-    return 1520.0  # fallback
+
+    # Upstream unreachable — reuse the last known rate if we have one.
+    if _NAIRA_CACHE["rate"] is not None:
+        return _NAIRA_CACHE["rate"]
+    return None
 
 
 async def _map_positions(profile_id, db: AsyncSession) -> List[PositionItem]:
@@ -326,6 +350,15 @@ async def toggle_currency(
         raise HTTPException(status_code=400, detail="Invalid currency")
     naira_rate = await _fetch_naira_rate() if currency == "NGN" else 1.0
     return {"status": "success", "currency": currency, "nairaRate": naira_rate}
+
+
+@router.get("/api/exchange-rate")
+async def get_exchange_rate(
+    user: dict = Depends(get_current_user),
+):
+    """Return the current live USD/NGN rate (cached for 1h upstream)."""
+    naira_rate = await _fetch_naira_rate()
+    return {"status": "success", "currency": "USD", "nairaRate": naira_rate}
 
 
 @router.post("/api/reset-settings")

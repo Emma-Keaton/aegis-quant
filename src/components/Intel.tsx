@@ -1,9 +1,13 @@
-import { useState, useEffect } from "react";
+﻿import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import CopyTradeManager from "./CopyTradeManager";
-import { Zap, RefreshCw, Radio, Sparkles, MessageSquare, Flame, Plus, Trash2, CheckCircle, XCircle } from "lucide-react";
-import { MarketSignal, AlertRule } from "../types";
+import {
+  RefreshCw, Radio, Sparkles, MessageSquare, Flame, Plus, Trash2,
+  CheckCircle, XCircle, Link2, Activity, Zap,
+} from "lucide-react";
+import { MarketSignal } from "../types";
 import { apiFetch, apiJson } from "../api/client";
+import TelegramLinkCard from "./TelegramLinkCard";
 
 interface Source {
   id: string;
@@ -22,17 +26,30 @@ interface SourcesResponse {
   user_count: number;
 }
 
+const CHANNELS: { type: string; label: string; hint: string }[] = [
+  { type: "telegram", label: "Telegram", hint: "t.me/... or @handle" },
+  { type: "reddit", label: "Reddit", hint: "r/... or subreddit URL" },
+  { type: "rss", label: "RSS (News)", hint: "news / feed URL" },
+];
+
+const CHANNEL_LABEL: Record<string, string> = {
+  telegram: "TELEGRAM",
+  reddit: "REDDIT",
+  rss: "RSS / NEWS",
+  twitter: "TWITTER",
+  onchain: "ON-CHAIN",
+};
+
 interface IntelProps {
-  onActivateAgent: (ticker: string, size: number) => void;
+  agentActedTickers: string[];
   networkOffline: boolean;
 }
 
-export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
+export default function Intel({ agentActedTickers, networkOffline }: IntelProps) {
   const queryClient = useQueryClient();
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
-  const [showAddSource, setShowAddSource] = useState(false);
-  const [newSource, setNewSource] = useState({ name: "", type: "rss", url: "", priority: 5 });
+  const [newSource, setNewSource] = useState({ name: "", type: "telegram", url: "", priority: 5 });
 
   // Fetch signals from backend
   const { data: signalsData, isLoading, error, refetch } = useQuery({
@@ -79,19 +96,19 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
   };
 
   const handleAddSource = async () => {
-    if (!newSource.name || !newSource.url) return;
+    if (!newSource.url) return;
+    const name = newSource.name || newSource.url;
     try {
       await apiJson("/api/sources/my", {
         method: "POST",
         body: JSON.stringify({
-          name: newSource.name,
+          name,
           source_type: newSource.type,
           url_or_handle: newSource.url,
           priority: newSource.priority,
         }),
       });
-      setNewSource({ name: "", type: "rss", url: "", priority: 5 });
-      setShowAddSource(false);
+      setNewSource({ name: "", type: newSource.type, url: "", priority: 5 });
       queryClient.invalidateQueries({ queryKey: ["sources"] });
     } catch (err) {
       console.error("Failed to add source:", err);
@@ -122,10 +139,13 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
   const signals: MarketSignal[] = signalsData || [];
   const sources: Source[] = sourcesData?.sources || [];
 
-  const handleActivate = (sig: MarketSignal) => {
-    const ticker = sig.ticker.replace("$", "");
-    onActivateAgent(ticker, 100);
-  };
+  const baseTicker = (t: string) =>
+    t.replace("$", "").replace("/USDT", "").trim().toUpperCase();
+
+  // Cards show only signals the agent is currently acting on (open positions).
+  const actedSignals = signals.filter((sig) =>
+    agentActedTickers.includes(baseTicker(sig.ticker))
+  );
 
   return (
     <div className="space-y-6 pb-24 font-sans" id="intel_screen">
@@ -145,134 +165,29 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
         </button>
       </div>
 
-      {/* Sources Panel */}
-      <div className="space-y-3">
-        <div className="flex justify-between items-center">
-          <span className="text-xs uppercase tracking-widest text-zinc-400 font-bold px-1">WATCHED SOURCES</span>
-          <button
-            onClick={() => setShowAddSource(!showAddSource)}
-            className="text-[10px] text-[#c6ff34] hover:text-white px-2 py-1 rounded border border-[#c6ff34]/30 hover:border-[#c6ff34] transition-all flex items-center gap-1"
-          >
-            <Plus className="w-3 h-3" /> ADD SOURCE
-          </button>
+      {/* Console Feed Monitor Widget */}
+      <div className="bg-[#1c2023] border border-zinc-800 p-4 rounded-xl flex items-center gap-4">
+        <div className="w-10 h-10 bg-zinc-950 rounded-lg border border-zinc-800 flex items-center justify-center shrink-0">
+          <Activity className={`w-5 h-5 text-[#c6ff34] ${syncing ? "animate-pulse" : ""}`} />
         </div>
-
-        {/* Add Source Form */}
-        {showAddSource && (
-          <div className="bg-[#1c2023] border border-[#c6ff34]/30 p-4 rounded-xl space-y-3 animate-fadeIn">
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                type="text"
-                placeholder="Source name (e.g. Whale Alert)"
-                value={newSource.name}
-                onChange={e => setNewSource(p => ({ ...p, name: e.target.value }))}
-                className="bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 placeholder-zinc-600 focus:outline-none focus:border-[#c6ff34]"
-              />
-              <select
-                value={newSource.type}
-                onChange={e => setNewSource(p => ({ ...p, type: e.target.value }))}
-                className="bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 focus:outline-none focus:border-[#c6ff34]"
-              >
-                <option value="rss">RSS Feed</option>
-                <option value="telegram">Telegram Channel</option>
-                <option value="twitter">Twitter/X</option>
-                <option value="reddit">Reddit</option>
-                <option value="onchain">On-Chain</option>
-              </select>
-            </div>
-            <input
-              type="text"
-              placeholder="URL or handle (e.g. @CryptoWhale or https://example.com/rss)"
-              value={newSource.url}
-              onChange={e => setNewSource(p => ({ ...p, url: e.target.value }))}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg text-xs text-white p-2.5 placeholder-zinc-600 focus:outline-none focus:border-[#c6ff34]"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowAddSource(false)}
-                className="text-xs text-zinc-400 hover:text-white px-3 py-1.5 rounded-lg transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAddSource}
-                disabled={!newSource.name || !newSource.url}
-                className="bg-[#c6ff34] text-black text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-[#b0f020] transition-all disabled:opacity-50"
-              >
-                Add Source
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Sources List */}
-        <div className="bg-[#1c2023] border border-zinc-800 rounded-xl p-4 space-y-2">
-          {sourcesLoading ? (
-            <p className="text-xs text-zinc-500 text-center py-4">Loading sources...</p>
-          ) : sources.length === 0 ? (
-            <p className="text-xs text-zinc-500 text-center py-4">No sources configured. Add RSS feeds, Telegram channels, or Twitter accounts.</p>
-          ) : (
-            sources.map((src) => (
-              <div
-                key={src.id}
-                className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
-                  src.enabled
-                    ? "border-zinc-700 bg-zinc-900/50"
-                    : "border-zinc-800 bg-zinc-950/30 opacity-60"
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  {src.enabled ? (
-                    <CheckCircle className="w-4 h-4 text-[#c6ff34] shrink-0" />
-                  ) : (
-                    <XCircle className="w-4 h-4 text-zinc-600 shrink-0" />
-                  )}
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-white truncate">{src.name}</p>
-                    <p className="text-[10px] text-zinc-500 font-mono truncate">{src.url_or_handle}</p>
-                  </div>
-                  <span className="text-[9px] uppercase font-bold text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded shrink-0">
-                    {src.source_type}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {!src.is_default && (
-                    <>
-                      <button
-                        onClick={() => handleToggleSource(src)}
-                        className={`text-xs px-2 py-1 rounded transition-all ${
-                          src.enabled
-                            ? "text-[#c6ff34] hover:bg-[#c6ff34]/10"
-                            : "text-zinc-500 hover:text-zinc-300"
-                        }`}
-                      >
-                        {src.enabled ? "ON" : "OFF"}
-                      </button>
-                      <button
-                        onClick={() => handleDeleteSource(src.id)}
-                        className="text-zinc-500 hover:text-red-400 p-1 rounded transition-all"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </>
-                  )}
-                  {src.is_default && (
-                    <span className="text-[9px] text-zinc-600 font-mono">DEFAULT</span>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
+        <div className="min-w-0 space-y-1">
+          <p className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+            <span className={`w-1.5 h-1.5 rounded-full ${syncing ? "bg-[#c6ff34] animate-pulse" : "bg-[#c6ff34]"}`}></span>
+            Market Feed {syncing ? "Scanning..." : "Online"}
+          </p>
+          <p className="text-[10px] font-mono text-zinc-500 truncate">
+            {sources.length} sources - {signals.length} parsed signals - Binance + CoinGecko + Coinbase + CoinLore
+          </p>
         </div>
       </div>
 
-      {/* Signals Section */}
+      {/* Agent-Acted Opportunities */}
       <div className="space-y-3">
         <div className="flex justify-between items-center">
-          <p className="text-xs uppercase tracking-wider text-zinc-400 font-bold px-1">IDENTIFIED OPPORTUNITIES</p>
-          {lastSync && (
-            <span className="text-[10px] text-zinc-500 font-mono">Updated: {lastSync}</span>
-          )}
+          <p className="text-xs uppercase tracking-wider text-zinc-400 font-bold px-1 flex items-center gap-1.5">
+            <Zap className="w-3.5 h-3.5 text-[#c6ff34]" /> AGENT ACTIONS
+          </p>
+          <span className="text-[10px] text-[#c6ff34] font-mono font-bold">{actedSignals.length} ACTIVE</span>
         </div>
 
         {isLoading && signals.length === 0 ? (
@@ -294,34 +209,21 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
         ) : error ? (
           <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-xl text-center space-y-2">
             <p className="text-xs font-bold text-red-400">{error}</p>
-            <button
-              onClick={() => refetch()}
-              className="text-xs text-white underline hover:text-[#c6ff34]"
-            >
+            <button onClick={() => refetch()} className="text-xs text-white underline hover:text-[#c6ff34]">
               Try Again
             </button>
           </div>
-        ) : signals.length === 0 ? (
-          <div className="bg-zinc-900/30 border border-dashed border-zinc-800 p-8 rounded-2xl text-center space-y-2">
-            <p className="text-sm font-bold text-zinc-400">No Active Signals</p>
-            <p className="text-xs text-zinc-600">Click SYNC to scan configured sources for trading opportunities.</p>
-            <button
-              onClick={handleRescan}
-              disabled={syncing || networkOffline}
-              className="mt-2 bg-[#c6ff34] text-black text-xs font-bold px-4 py-2 rounded-lg hover:bg-[#b0f020] transition-all disabled:opacity-50"
-            >
-              {syncing ? "Scanning..." : "SCAN NOW"}
-            </button>
+        ) : actedSignals.length === 0 ? (
+          <div className="bg-zinc-900/30 border border-dashed border-zinc-800 p-6 rounded-2xl text-center space-y-1">
+            <p className="text-sm font-bold text-zinc-300">No Active Agent Actions</p>
+            <p className="text-xs text-zinc-600">The agent currently has no open positions on parsed signals. Open positions will appear here.</p>
           </div>
         ) : (
           <div className="space-y-4">
-            {signals.map((sig, idx) => {
+            {actedSignals.map((sig, idx) => {
               const confidence = sig.confidence || 80;
               return (
-                <div
-                  key={idx}
-                  className="bg-[#1c2023] border border-zinc-800 rounded-2xl overflow-hidden flex flex-col group hover:border-[#c6ff34]/40 transition-all duration-300"
-                >
+                <div key={idx} className="bg-[#1c2023] border border-zinc-800 rounded-2xl overflow-hidden flex flex-col group hover:border-[#c6ff34]/40 transition-all duration-300">
                   <div className="p-5 space-y-4 flex-1">
                     {/* Top Row Ticker */}
                     <div className="flex justify-between items-start">
@@ -358,22 +260,16 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
                         <Sparkles className="w-3 h-3 fill-[#c6ff34] text-[#c6ff34]" />
                         <span>AI Analysis</span>
                       </div>
-                      <p className="text-xs text-zinc-300 font-medium leading-relaxed italic">
-                        "{sig.analysis}"
-                      </p>
+                      <p className="text-xs text-zinc-300 font-medium leading-relaxed italic">"{sig.analysis}"</p>
                     </div>
                   </div>
 
-                  {/* Activation Button */}
+                  {/* Passive agent status footer */}
                   <div className="px-5 pb-5 pt-1 bg-zinc-950/20">
-                    <button
-                      onClick={() => handleActivate(sig)}
-                      disabled={networkOffline}
-                      className="w-full bg-[#c6ff34] text-[#101416] font-black text-xs py-3.5 px-4 rounded-xl flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
+                    <div className="w-full flex items-center justify-center gap-1.5 border border-[#c6ff34]/30 bg-[#c6ff34]/10 text-[#c6ff34] font-black text-xs py-3 px-4 rounded-xl uppercase tracking-wider">
                       <Zap className="w-3.5 h-3.5 fill-current" />
-                      {sig.actionLabel}
-                    </button>
+                      AGENT IN POSITION
+                    </div>
                   </div>
                 </div>
               );
@@ -381,16 +277,142 @@ export default function Intel({ onActivateAgent, networkOffline }: IntelProps) {
           </div>
         )}
       </div>
+      {/* Global Signal Convergence - all parsed signals from all sources */}
+      <div className="space-y-3">
+        <div className="flex justify-between items-center">
+          <p className="text-xs uppercase tracking-wider text-zinc-400 font-bold px-1 flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-[#c6ff34]" /> GLOBAL SIGNAL CONVERGENCE
+          </p>
+          <span className="text-[10px] text-zinc-500 font-mono font-bold">{signals.length} PARSED</span>
+        </div>
+        <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4 relative overflow-hidden">
+          <div className="absolute inset-0 opacity-10 pointer-events-none bg-[radial-gradient(#c6ff34_1px,transparent_1px)] [background-size:12px_12px]"></div>
+          <div className="relative z-10 space-y-2 max-h-72 overflow-y-auto no-scrollbar pr-1">
+            {signals.length === 0 ? (
+              <p className="text-xs text-zinc-500 text-center py-6">No parsed signals yet. Hit SYNC to scan configured sources.</p>
+            ) : (
+              signals.map((sig, idx) => (
+                <div key={idx} className="flex items-center justify-between gap-3 bg-zinc-950/60 border border-zinc-800/60 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-6 h-6 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center font-black text-[10px] text-[#c6ff34] shrink-0">
+                      {baseTicker(sig.ticker).slice(0, 1)}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white truncate">{sig.ticker}</p>
+                      <p className="text-[9px] font-mono text-zinc-500 truncate">{CHANNEL_LABEL[sig.source] || sig.source}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[9px] font-mono text-[#c6ff34] font-bold">{sig.confidence || 80}%</span>
+                    <span className="text-[9px] font-mono text-zinc-500">{sig.metric}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
 
       <CopyTradeManager />
-      
-      {/* Decorative convergence analytics block */}
-      <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-6 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-transparent z-10"></div>
-        <div className="absolute inset-0 opacity-10 pointer-events-none bg-[radial-gradient(#c6ff34_1px,transparent_1px)] [background-size:12px_12px]"></div>
-        <div className="relative z-20 space-y-1">
-          <p className="text-xs font-black uppercase text-[#c6ff34] tracking-widest">Global Signal Convergence</p>
-          <p className="text-[10px] text-zinc-400 font-medium">Multi-chain sentiment clusters and social matrix analysis processed via Engine B + Groq.</p>
+
+      {/* Source Linker - channel + source input system */}
+      <div className="space-y-3">
+        <p className="text-[10px] uppercase tracking-widest text-[#c6ff34] font-black flex items-center gap-1.5 px-1">
+          <Link2 className="w-3.5 h-3.5" /> SOURCE LINKER
+        </p>
+        <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-5 space-y-4">
+          <p className="text-[11px] text-zinc-400">
+            Link a channel - pick Telegram, Reddit, or RSS (news) - then paste the link, handle, or ID. The agent will start parsing it into the convergence feed.
+          </p>
+          {/* Telegram account link for private channels */}
+          <TelegramLinkCard />
+
+
+          {/* Channel selector segmented control */}
+          <div className="grid grid-cols-3 gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+            {CHANNELS.map((ch) => (
+              <button
+                key={ch.type}
+                type="button"
+                onClick={() => setNewSource((s) => ({ ...s, type: ch.type }))}
+                className={`px-2 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  newSource.type === ch.type
+                    ? "bg-[#c6ff34] text-black shadow-lg shadow-[#c6ff34]/20"
+                    : "text-zinc-500 hover:text-white"
+                }`}
+              >
+                {ch.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Source input */}
+          <div className="space-y-2">
+            <label className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold block">
+              SOURCE INPUT - {CHANNELS.find((c) => c.type === newSource.type)?.hint}
+            </label>
+            <input
+              value={newSource.url}
+              onChange={(e) => setNewSource((s) => ({ ...s, url: e.target.value }))}
+              placeholder="Paste link, handle, or ID..."
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white p-3 placeholder-zinc-600 focus:outline-none focus:border-[#c6ff34]"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={handleAddSource}
+            disabled={!newSource.url || networkOffline}
+            className="w-full bg-[#c6ff34] text-[#101416] font-black text-xs py-3.5 px-4 rounded-xl flex items-center justify-center gap-1.5 hover:brightness-110 active:scale-[0.98] transition-all uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Link2 className="w-3.5 h-3.5" /> LINK CHANNEL
+          </button>
+        </div>
+
+        {/* Watched Sources */}
+        <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-5 space-y-3">
+          <div className="flex justify-between items-center">
+            <p className="text-xs font-bold text-zinc-300 uppercase tracking-wider">WATCHED SOURCES</p>
+            <span className="text-[10px] font-mono text-zinc-500">{sources.length} TRACKED</span>
+          </div>
+          {sourcesLoading ? (
+            <div className="space-y-2">
+              {[1, 2].map((i) => <div key={i} className="h-10 bg-zinc-900/60 rounded-lg animate-pulse"></div>)}
+            </div>
+          ) : sources.length === 0 ? (
+            <p className="text-xs text-zinc-500 text-center py-4">No sources linked yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {sources.map((src) => (
+                <div key={src.id} className="flex items-center justify-between gap-2 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white truncate">{src.name}</p>
+                    <p className="text-[9px] font-mono text-zinc-500 truncate">
+                      {CHANNEL_LABEL[src.source_type] || src.source_type.toUpperCase()}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => handleToggleSource(src)}
+                      className={`text-[8px] font-black uppercase px-2 py-1 rounded-md border transition-all cursor-pointer ${
+                        src.enabled
+                          ? "bg-[#c6ff34]/10 text-[#c6ff34] border-[#c6ff34]/20"
+                          : "bg-zinc-900 text-zinc-500 border-zinc-800"
+                      }`}
+                    >
+                      {src.enabled ? "ON" : "OFF"}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteSource(src.id)}
+                      className="p-1.5 rounded-md text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

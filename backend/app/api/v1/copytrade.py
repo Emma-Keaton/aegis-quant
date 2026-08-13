@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.telegram_auth import get_current_user
 from app.database import get_db
 from app.models import CopyTradeSubscription, Profile, Profile as ProfileType
+from app.services.copytrade_scanner import run_copytrade_scan_once
 
 router = APIRouter(prefix="/api/copytrade", tags=["copy-trading"])
 
@@ -24,6 +25,7 @@ async def register_channel(
     """Register a Telegram channel for copy-trading."""
     channel_id = request.get("channelId") or request.get("channel_id")
     confidence_threshold = request.get("confidenceThreshold") or request.get("confidence_threshold", 70)
+    parser_llm = request.get("parserLLM") or request.get("parser_llm", "groq")
     
     if not channel_id:
         raise HTTPException(status_code=400, detail="channelId is required")
@@ -31,6 +33,10 @@ async def register_channel(
     threshold = int(confidence_threshold)
     if not (0 <= threshold <= 100):
         raise HTTPException(status_code=400, detail="confidenceThreshold must be 0-100")
+
+    llm = str(parser_llm).lower()
+    if llm not in ("gemini", "groq", "auto"):
+        raise HTTPException(status_code=400, detail="parser_llm must be gemini, groq, or auto")
     
     telegram_id = user["id"]
     result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
@@ -49,12 +55,14 @@ async def register_channel(
     
     if sub:
         sub.confidence_threshold = threshold
+        sub.parser_llm = llm
         sub.updated_at = datetime.now(timezone.utc)
     else:
         sub = CopyTradeSubscription(
             profile_id=profile.id,
             channel_id=channel_id,
             confidence_threshold=threshold,
+            parser_llm=llm,
             active=True,
         )
         db.add(sub)
@@ -207,5 +215,6 @@ async def run_copytrade_scan(
     return {
         "status": "success",
         "channelsScanned": len(channels),
-        "results": []
+        "results": await run_copytrade_scan_once(),
+        "message": "Copy-trade scan executed (parse -> confidence -> execute)."
     }

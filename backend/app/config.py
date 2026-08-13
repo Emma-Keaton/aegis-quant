@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_USERNAME: str = "aegisquantbot"
     APP_URL: str = "http://localhost:3000"
     API_PUBLIC_URL: str = ""  # Public API base URL for webhook registration, e.g. https://aegis-api.onrender.com
+    PUBLIC_URL: str = ""  # Canonical public base URL (overrides API_PUBLIC_URL when set; also falls back to Render's RENDER_EXTERNAL_URL)
     ADMIN_CHAT_ID: Optional[int] = None
     TELEGRAM_WEBHOOK_SECRET: str = ""
 
@@ -75,7 +76,7 @@ class Settings(BaseSettings):
 
     # Groq / LLM
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "llama-3.1-70b-versatile"
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
     # Scraper Accounts
     TWITTER_ACCOUNTS_JSON: str = "[]"
@@ -158,6 +159,10 @@ class Settings(BaseSettings):
     # Minimum seconds between scraping the same external source (per-source cooldown).
     ENGINE_B_SCRAPE_COOLDOWN_SECONDS: int = 90
 
+    # Copy-trade channel polling cadence + toggle.
+    COPYTRADE_SCAN_ENABLED: bool = True
+    COPYTRADE_SCAN_SECONDS: int = 30
+
     # WalletConnect / Reown
     WALLET_CONNECT_PROJECT_ID: str = ""
 
@@ -169,6 +174,10 @@ class Settings(BaseSettings):
         {"command": "mode", "description": "Set trading mode (paper/live)"},
         {"command": "toggle_bot", "description": "Enable/disable trading agent"},
         {"command": "signals", "description": "View current signals"},
+        {"command": "balance", "description": "View paper balance and positions"},
+        {"command": "watch", "description": "Add a token to the watchlist"},
+        {"command": "trade", "description": "Take a trade (buy/sell amount symbol)"},
+        {"command": "scan", "description": "Run a copy-trade channel scan"},
     ]
 
     # Logging

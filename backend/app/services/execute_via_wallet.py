@@ -29,25 +29,28 @@ async def execute_trade_via_llm(
         if not wallet_address:
             raise ExecutionError("wallet_address required for solana execution")
         client = get_solana_client()
-        kp = load_solana_keypair()
-        from solana.transaction import Transaction
-        from solana.system_program import TransferParams, transfer
+        try:
+            kp = load_solana_keypair()
+            from solders.transaction import Transaction
+            from solders.system_program import TransferParams, transfer
+            from solders.pubkey import Pubkey
 
-        # Simple SOL transfer – replace with Serum/Raydium order logic later.
-        txn = Transaction()
-        txn.add(
-            transfer(
-                TransferParams(
-                    from_pubkey=kp.public_key,
-                    to_pubkey=wallet_address,
-                    lamports=int(order.get("size", 0) * 1e9),
+            # Simple SOL transfer – replace with a Jupiter swap later.
+            txn = Transaction()
+            txn.add(
+                transfer(
+                    TransferParams(
+                        from_pubkey=kp.public_key,
+                        to_pubkey=Pubkey.from_string(wallet_address),
+                        lamports=int(order.get("size", 0) * 1e9),
+                    )
                 )
             )
-        )
-        resp = client.send_transaction(txn, kp)
-        if not resp.get("result"):
-            raise ExecutionError(f"Solana transaction failed: {resp}")
-        return {"tx_hash": resp["result"]}
+            resp = await client.send_transaction(txn, kp)
+            sig = str(resp.value) if hasattr(resp, "value") else str(resp)
+            return {"tx_hash": sig}
+        finally:
+            await client.close()
     else:
         # Centralized exchange via CCXT
         if not exchange_name:

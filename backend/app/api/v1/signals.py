@@ -33,7 +33,7 @@ def _generate_kronos_signal(ticker: str, confidence: int, analysis: str) -> Dict
         "category": "Crypto",
         "badge": f"{confidence}% CONFIDENCE",
         "source": "Kronos",
-        "metric": f"{np.random.randint(10, 500)}/hr mentions",
+        "metric": "Source corpus scan",
         "analysis": analysis,
         "confidence": confidence,
         "actionLabel": f"ACTIVATE AGENT FOR ${ticker}",
@@ -86,20 +86,51 @@ async def _get_kronos_signals_for_ticker(ticker: str, lookback: int = 200) -> Li
 async def get_signals(
     engine: Optional[str] = None,
     limit: int = Query(20, ge=1, le=100),
+    scope: Optional[str] = Query(None, pattern="^(acted)?$"),
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get market signals — first from database, then from Kronos if empty."""
+    """Get market signals — first from database, then from Kronos if empty.
+
+    scope=acted returns only signals whose ticker currently has an open position
+    (i.e. signals the execution agent is actively working on).
+    """
     # Try database first
     query = select(Signal).order_by(Signal.created_at.desc()).limit(limit)
     result = await db.execute(query)
     db_signals = result.scalars().all()
 
     if db_signals:
-        return SignalListResponse(
-            signals=[SignalResponse.model_validate(s) for s in db_signals],
-            count=len(db_signals),
-        )
+        signals_out = [SignalResponse.model_validate(s) for s in db_signals]
+        if scope == "acted":
+            # Restrict to signals for symbols with an open (unclosed) position.
+            from app.models import Position
+            profile_result = await db.execute(
+                select(Profile).where(Profile.telegram_id == user["id"])
+            )
+            profile = profile_result.scalar_one_or_none()
+            open_tickers: set = set()
+            if profile is not None:
+                pos_result = await db.execute(
+                    select(Position).where(
+                        Position.profile_id == profile.id,
+                        Position.is_closed == False,
+                    )
+                )
+                open_tickers = {
+                    p.symbol.replace("$", "").upper()
+                    for p in pos_result.scalars().all()
+                    if p.symbol
+                }
+            signals_out = [
+                s for s in signals_out
+                if s.ticker.replace("$", "").upper() in open_tickers
+            ]
+        return SignalListResponse(signals=signals_out, count=len(signals_out))
+
+    # scope=acted with no matching DB rows → never fabricate "acted" signals
+    if scope == "acted":
+        return SignalListResponse(signals=[], count=0)
 
     # No DB signals — generate Kronos signals for popular tokens
     popular_tickers = ['SOL', 'TON', 'BTC', 'ETH', 'WIF', 'PEPE', 'BONK', 'DOGE']

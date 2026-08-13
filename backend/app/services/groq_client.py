@@ -30,7 +30,6 @@ class GroqClient:
         return self._client
 
     async def analyze_text(self, text: str, ticker: str) -> Dict:
-        """Analyze text for sentiment and trading signal."""
         prompt = f"""Analyze this crypto news/social text for trading signals.
 
 Ticker: {ticker}
@@ -68,6 +67,45 @@ Only output valid JSON, no markdown."""
         except Exception as e:
             logger.warning(f"Groq analysis failed: {e}")
             return {"sentiment": 0.0, "confidence": 30, "action": "HOLD", "reasoning": f"Analysis error: {e}"}
+
+    async def extract_signal(self, text: str, max_len: int = 600) -> Dict:
+        """Decode a raw channel message into a structured trade signal."""
+        prompt = (
+            "You are a trading signal parser. Decode the following crypto "
+            "channel message into a structured signal.\n\n"
+            f"Message: {text[:max_len]}\n\n"
+            'Output JSON only with keys:\n'
+            '- ticker: the coin symbol (e.g. "SOL"), or null\n'
+            '- action: "BUY" | "SELL" | "HOLD"\n'
+            '- size: notional amount in USD (number) or null\n'
+            '- confidence: int 0-100\n'
+            '- sentiment: float between -1 and 1\n'
+            '- reason: one short sentence\n'
+            "If the message is not a trading signal, set action to HOLD and ticker to null."
+        )
+        loop = asyncio.get_running_loop()
+        try:
+            result = await loop.run_in_executor(
+                None,
+                lambda: self._get_client().chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=250,
+                    response_format={"type": "json_object"},
+                )
+            )
+            response_text = result.choices[0].message.content or ""
+            start = response_text.find("{")
+            end = response_text.rfind("}") + 1
+            if start >= 0 and end > start:
+                return json.loads(response_text[start:end])
+            return {"ticker": None, "action": "HOLD", "size": None, "confidence": 0,
+                    "sentiment": 0.0, "reason": response_text[:120]}
+        except Exception as e:
+            logger.warning(f"Groq signal extraction failed: {e}")
+            return {"ticker": None, "action": "HOLD", "size": None, "confidence": 0,
+                    "sentiment": 0.0, "reason": f"Parser error: {e}"}
 
     async def batch_analyze(self, texts: List[Dict[str, str]]) -> List[Dict]:
         """Analyze multiple texts in parallel."""

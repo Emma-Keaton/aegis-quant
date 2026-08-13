@@ -266,6 +266,22 @@ class EngineA:
             # Process signal
             await self._process_signal(profile, event)
     
+    def _venue_for(self, profile: Profile, exchange: str):
+        """Determine CEX vs on-chain DEX venue from the whitelist exchange /
+        the user's connected wallet network."""
+        ex = (exchange or "").lower()
+        if ex in ("solana", "sol"):
+            return "solana", (profile.wallet_address if profile.wallet_connected else None)
+        if ex in ("ton", "toncoin"):
+            return "ton", (profile.wallet_address if profile.wallet_connected else None)
+        net = (profile.wallet_network or "").lower()
+        if profile.wallet_connected and profile.wallet_address:
+            if "sol" in net:
+                return "solana", profile.wallet_address
+            if net in ("ton", "toncoin"):
+                return "ton", profile.wallet_address
+        return "centralized", None
+
     async def _process_signal(self, profile: Profile, event: TriggerEvent):
         """Fetch candles, call Kronos, validate risk, execute"""
         try:
@@ -299,7 +315,8 @@ class EngineA:
                 logger.info(f"Risk check failed: {risk_check.reason}")
                 return
             
-            # 4. Execute trade
+            # 4. Determine venue (CEX vs Solana/TON DEX) + execute (dual routing).
+            exchange_type, wallet_address = self._venue_for(profile, event.exchange)
             execution = await self.execution_router.execute(
                 profile=profile,
                 symbol=event.symbol,
@@ -308,7 +325,9 @@ class EngineA:
                 price=event.current_price,
                 stop_loss=risk_check.stop_loss,
                 take_profit=risk_check.take_profit,
-                mode=profile.trading_mode.value
+                mode=profile.trading_mode.value,
+                exchange_type=exchange_type,
+                wallet_address=wallet_address,
             )
             
             # 5. Log execution audit
@@ -339,6 +358,12 @@ class EngineA:
     
     async def _log_execution_audit(self, profile: Profile, event: TriggerEvent, forecast: dict, execution: dict):
         """Log immutable execution audit trail"""
+        import dataclasses
+        if not isinstance(execution, dict):
+            try:
+                execution = dataclasses.asdict(execution)
+            except Exception:
+                execution = {}
         async with AsyncSessionLocal() as db:
             audit = ExecutionAudit(
                 profile_id=profile.id,

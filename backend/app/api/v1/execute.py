@@ -8,7 +8,7 @@ from uuid import UUID
 
 from app.database import get_db
 from app.core.telegram_auth import get_current_user
-from app.models import Profile, Position, TradeLog, TradeMode, OrderSide, OrderStatus, ExecutionType, PaperBalance
+from app.models import Profile, Position, TradeLog, TradeMode, OrderSide, OrderStatus, ExecutionType, PaperBalance, RiskSettings
 from app.metrics import record_trade, record_pnl, update_positions, record_error
 
 router = APIRouter(prefix="/api/execute", tags=["execution"])
@@ -50,6 +50,15 @@ async def execute_trade(
     
     if profile.trading_mode == TradeMode.LIVE and not profile.bot_enabled:
         raise HTTPException(status_code=400, detail="Live trading not enabled")
+    
+    # Enforce the Spot & Margin permission for live orders.
+    if profile.trading_mode == TradeMode.LIVE:
+        risk_result = await db.execute(
+            select(RiskSettings).where(RiskSettings.profile_id == profile.id)
+        )
+        rs = risk_result.scalar_one_or_none()
+        if rs is not None and not rs.spot_margin_enabled:
+            raise HTTPException(status_code=400, detail="Spot & margin trading is disabled in Risk Settings")
     
     # Check max concurrent trades
     positions_result = await db.execute(

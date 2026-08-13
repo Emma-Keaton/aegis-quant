@@ -20,6 +20,7 @@ class RiskSettingsUpdate(BaseModel):
     max_daily_drawdown_pct: Optional[float] = Field(None, ge=1.0, le=20.0)
     whitelist_only: Optional[bool] = None
     base_trade_usd: Optional[float] = Field(None, ge=0.1, le=1000.0)
+    spot_margin_enabled: Optional[bool] = None
 
 
 class RiskSettingsResponse(BaseModel):
@@ -31,6 +32,7 @@ class RiskSettingsResponse(BaseModel):
     max_daily_drawdown_pct: float
     whitelist_only: bool
     base_trade_usd: float
+    spot_margin_enabled: bool
     updated_at: str
     
     class Config:

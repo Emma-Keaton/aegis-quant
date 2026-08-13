@@ -3,9 +3,19 @@ import json
 from typing import Dict
 
 import ccxt
-from solana.rpc.api import Client as SolanaClient
-from solana.keypair import Keypair
-from base58 import b58decode
+try:
+    from solders.keypair import Keypair
+    from solana.rpc.async_api import AsyncClient as SolanaClient
+    import base58 as _base58
+    _SOLANA_AVAILABLE = True
+except ImportError:
+    # The `solana`/`solders`/`base58` packages are optional (not installed on
+    # some hosts). Keep the module importable so the app and market feed start;
+    # Solana features raise a clear error only when actually used.
+    SolanaClient = None
+    Keypair = None
+    _base58 = None
+    _SOLANA_AVAILABLE = False
 
 # ---------- CCXT ----------
 
@@ -35,16 +45,24 @@ def get_ccxt_exchange(name: str) -> ccxt.Exchange:
 # ---------- Solana ----------
 
 def get_solana_client() -> SolanaClient:
+    if not _SOLANA_AVAILABLE:
+        raise RuntimeError("Solana support unavailable: install 'solders' + 'solana' to enable it")
     rpc = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
     return SolanaClient(rpc)
 
 def load_solana_keypair() -> Keypair:
+    if not _SOLANA_AVAILABLE:
+        raise RuntimeError("Solana support unavailable: install 'solders' + 'solana' to enable it")
     secret = os.getenv("SOLANA_PRIVATE_KEY")
     if not secret:
         raise RuntimeError("SOLANA_PRIVATE_KEY not set in environment")
+    # Preferred: base58-encoded 64-byte secret key (as exported by most wallets).
     try:
-        # Try hex first
-        return Keypair.from_secret_key(bytes.fromhex(secret))
-    except ValueError:
-        # Fall back to base58 encoding used by most wallets
-        return Keypair.from_secret_key(b58decode(secret))
+        return Keypair.from_base58_string(secret.strip())
+    except Exception:
+        pass
+    # Fallback: hex-encoded 32-byte secret key.
+    hexed = secret.strip()
+    if hexed.startswith(("0x", "0X")):
+        hexed = hexed[2:]
+    return Keypair.from_bytes(bytes.fromhex(hexed))

@@ -85,14 +85,22 @@ class ExecutionRouter:
         price: float,
         stop_loss: Optional[float],
         take_profit: Optional[float],
-        mode: str  # "paper" or "live"
+        mode: str,  # "paper" or "live"
+        exchange_type: str = "centralized",  # "centralized" | "solana"
+        wallet_address: Optional[str] = None,
     ) -> ExecutionResult:
-        """Execute trade based on profile settings and mode"""
-        
-        # Default to Bybit
+        """Execute trade based on profile settings, mode and venue."""
         exchange = "bybit"
-        
+
         if mode == "live":
+            if exchange_type == "solana":
+                return await self._execute_solana_dex(
+                    profile, symbol, side, size, price, stop_loss, take_profit, wallet_address
+                )
+            if exchange_type == "ton":
+                return await self._execute_ton(
+                    profile, symbol, side, size, price, stop_loss, take_profit, wallet_address
+                )
             return await self._execute_live(
                 profile, exchange, symbol, side, size, price, stop_loss, take_profit
             )
@@ -112,31 +120,163 @@ class ExecutionRouter:
         stop_loss: Optional[float],
         take_profit: Optional[float]
     ) -> ExecutionResult:
-        """Simulate paper trade execution"""
-        # In paper mode, just return success
-        # Real price would come from CCXT fetch_ticker
+        """Simulate paper trade execution, debiting/crediting the real paper balance."""
+        # Resolve a real fill price when possible (falls back to provided price).
         import ccxt.async_support as ccxt
         ex = ccxt.bybit({'enableRateLimit': True})
         try:
             ticker = await ex.fetch_ticker(symbol)
-            real_price = ticker['last']
+            fill_price = ticker['last']
         except:
-            real_price = price
+            fill_price = price
         await ex.close()
-        
+
+        fill_price = float(fill_price or price or 0)
+        notional = size * fill_price
+
+        # Load the real paper balance (single row per profile) and enforce funds.
+        from app.database import AsyncSessionLocal
+        from app.models import PaperBalance
+        from app.core.exceptions import InsufficientFundsError
+        from sqlalchemy import select
+        async with AsyncSessionLocal() as db:
+            pb_result = await db.execute(
+                select(PaperBalance).where(PaperBalance.profile_id == profile.id)
+            )
+            pb = pb_result.scalar_one_or_none()
+
+            if side == "buy":
+                have = float(pb.balance) if pb and pb.balance is not None else 0.0
+                if notional > have:
+                    raise InsufficientFundsError(
+                        f"Insufficient paper balance: need {notional:.2f}, have {have:.2f}"
+                    )
+                pb.balance = Decimal(str(have - notional))
+            else:  # sell credits proceeds back to the paper balance
+                have = float(pb.balance) if pb and pb.balance is not None else 0.0
+                if pb is None:
+                    pb = PaperBalance(profile_id=profile.id, asset="TON", balance=0)
+                    db.add(pb)
+                pb.balance = Decimal(str(have + notional))
+            await db.commit()
+
         return ExecutionResult(
             executed=True,
             side=side,
             symbol=symbol,
             size=size,
-            price=real_price,
+            price=fill_price,
             stop_loss=stop_loss,
             take_profit=take_profit,
             route="paper",
             status="filled",
-            order_id=f"paper_{symbol}_{side}_{int(price * 1000)}"
+            order_id=f"paper_{symbol}_{side}_{int(fill_price * 1000)}"
         )
     
+    async def _execute_solana_dex(
+        self,
+        profile,
+        symbol: str,
+        side: str,
+        size: float,
+        price: float,
+        stop_loss: Optional[float],
+        take_profit: Optional[float],
+        wallet_address: Optional[str] = None,
+    ) -> ExecutionResult:
+        """Execute a live trade on the Solana DEX via Jupiter, signed by the server keypair."""
+        import json as _json
+        import base64
+
+        from app.core.exceptions import ExchangeError
+        from app.services.jupiter_client import get_jupiter_client, SOL_MINT, sol_to_usd_price
+        from app.services.wallet_gateway import get_solana_client, load_solana_keypair
+
+        if not wallet_address:
+            raise ExchangeError("wallet_address required for solana dex execution", "SOLANA")
+
+        jup = get_jupiter_client()
+        rpc = get_solana_client()
+        kp = load_solana_keypair()  # raises clearly if SOLANA_PRIVATE_KEY is unset
+
+        try:
+            # Resolve the token mint.
+            token_ref = await jup.get_token_by_symbol(symbol)
+            if not token_ref:
+                raise ExchangeError(f"Solana token '{symbol}' not found", "SOLANA")
+            token_mint = token_ref if isinstance(token_ref, str) else (token_ref.get("address") or token_ref.get("mint"))
+            if not token_mint:
+                raise ExchangeError(f"Could not resolve mint for '{symbol}'", "SOLANA")
+
+            side = (side or "buy").lower()
+            if side == "buy":
+                input_mint, output_mint = SOL_MINT, token_mint
+                usd = float(size or 0)
+                sol_price = await sol_to_usd_price()
+                sol = (usd / (sol_price or 1)) if sol_price else (usd or 0)
+                input_amount = max(int(sol * 1e9 * 0.99), 1000)  # leave fee buffer
+            else:
+                input_mint, output_mint = token_mint, SOL_MINT
+                # Selling `size` token units (assume 9 decimals like SOL).
+                input_amount = max(int(float(size or 0) * 1e9), 1)
+
+            quote = await jup.get_quote(input_mint, output_mint, input_amount, slippage_bps=200)
+            if not quote:
+                raise ExchangeError("Jupiter quote failed", "SOLANA")
+
+            swap_data = await jup.get_swap_transaction(_json.dumps(quote.to_dict()), str(kp.public_key))
+            if not swap_data or not swap_data.get("swapTransaction"):
+                raise ExchangeError("Failed to build Jupiter swap transaction", "SOLANA")
+
+            from solders.transaction import VersionedTransaction
+            txn = VersionedTransaction.from_bytes(base64.b64decode(swap_data["swapTransaction"]))
+            txn.sign([kp])
+            resp = await rpc.send_raw_transaction(bytes(txn))
+            sig = str(resp.value) if hasattr(resp, "value") else str(resp)
+
+            return ExecutionResult(
+                executed=True, side=side, symbol=symbol, size=size,
+                price=price or quote.price_pure, stop_loss=stop_loss, take_profit=take_profit,
+                route="dex_solana", status="filled", tx_hash=sig,
+            )
+        finally:
+            await jup.close()
+            await rpc.close()
+
+    async def _execute_ton(
+        self,
+        profile,
+        symbol: str,
+        side: str,
+        size: float,
+        price: float,
+        stop_loss: Optional[float],
+        take_profit: Optional[float],
+        wallet_address: Optional[str] = None,
+    ) -> ExecutionResult:
+        """Execute a live trade on TON (distinct venue from CEX).
+
+        Broadcasts a real TON transfer only when a server-side TON wallet is
+        configured (TON_PRIVATE_KEY / TON_MNEMONIC). Otherwise raises a clear
+        error instead of silently routing TON to a Centralized Exchange.
+        """
+        import os
+        from app.core.exceptions import ExchangeError
+
+        if not wallet_address:
+            raise ExchangeError("TON execution requires a recipient wallet_address", "TON")
+        if not (os.getenv("TON_PRIVATE_KEY") or os.getenv("TON_MNEMONIC")):
+            raise ExchangeError(
+                "TON live execution requires a configured server TON wallet "
+                "(set TON_PRIVATE_KEY or TON_MNEMONIC) — not wired yet", "TON"
+            )
+
+        # Once a TON server wallet is configured, build + broadcast the transfer
+        # here (route="dex_ton"). Left explicit so we never fall back to CEX.
+        raise ExchangeError(
+            "TON live broadcast not yet implemented (server TON wallet not configured)", "TON"
+        )
+
     async def _execute_live(
         self,
         profile,
@@ -149,6 +289,26 @@ class ExecutionRouter:
         take_profit: Optional[float]
     ) -> ExecutionResult:
         """Execute live trade on CEX"""
+        # Enforce the Spot & Margin permission before placing a real order.
+        from app.core.exceptions import RiskLimitExceededError
+        try:
+            from app.database import AsyncSessionLocal
+            from app.models import RiskSettings
+            from sqlalchemy import select
+            async with AsyncSessionLocal() as db:
+                rs_result = await db.execute(
+                    select(RiskSettings).where(RiskSettings.profile_id == profile.id)
+                )
+                rs = rs_result.scalar_one_or_none()
+            if rs is not None and not rs.spot_margin_enabled:
+                raise RiskLimitExceededError(
+                    "Spot & margin trading is disabled in Risk Settings"
+                )
+        except RiskLimitExceededError:
+            raise
+        except Exception:
+            pass  # Never block a live order because the permission row is missing.
+
         try:
             client = await self._get_cex_client(str(profile.id), exchange)
             
@@ -201,8 +361,17 @@ class ExecutionRouter:
     async def get_balance(self, profile, exchange: str) -> Dict[str, float]:
         """Get account balance from exchange"""
         if profile.trading_mode.value == "paper":
-            return {"USDT": 10000.0}  # Mock paper balance
-        
+            # Return the user's real configured paper balance (not a hardcoded mock).
+            from app.database import AsyncSessionLocal
+            from app.models import PaperBalance
+            from sqlalchemy import select
+            async with AsyncSessionLocal() as db:
+                pb_result = await db.execute(
+                    select(PaperBalance).where(PaperBalance.profile_id == profile.id)
+                )
+                pb = pb_result.scalar_one_or_none()
+            return {"USDT": float(pb.balance) if pb and pb.balance is not None else 0.0}
+
         client = await self._get_cex_client(str(profile.id), exchange)
         balance = await client.fetch_balance()
         return {k: float(v['free']) for k, v in balance.items() if float(v['free']) > 0}

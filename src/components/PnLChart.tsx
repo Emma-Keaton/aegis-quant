@@ -39,7 +39,7 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
   const [chartError, setChartError] = useState<string | null>(null);
 
   const currency = userState.currency || "USD";
-  const nairaRate = userState.nairaRate || 1520;
+  const nairaRate = userState.nairaRate;
 
   // Fetch real portfolio history data
   useEffect(() => {
@@ -209,7 +209,7 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
 
   // Sync data across both chart instances
   useEffect(() => {
-    const scale = currency === "NGN" ? nairaRate : 1;
+    const scale = currency === "NGN" && nairaRate ? nairaRate : 1;
     const mappedData = chartData.map((d) => ({
       time: d.time,
       value: Math.round(d.value * scale * 100) / 100,
@@ -448,7 +448,9 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
             <div>
               <p className="text-[10px] text-zinc-500 uppercase font-black">EXCHANGE RATE</p>
               <p className="text-xs text-zinc-400 font-bold mt-0.5">
-                1 USD = <span className="text-[#c6ff34]">₦{nairaRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                {nairaRate
+                  ? `1 USD = ₦${nairaRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : "Exchange rate loading…"}
               </p>
             </div>
           </div>

@@ -1,48 +1,93 @@
 // Solana wallet connector using @solana/web3.js.
-// Connects to Phantom, Solflare, or other Solana wallets via window.solana injection.
+// Connects to Phantom, Solflare, or other Solana wallets via provider injection.
 
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
+import { openWalletApp } from './walletLinks';
 
-export async function connectSolana(): Promise<{ network: string; address: string }> {
-  // Check for injected Solana provider (Phantom, Solflare, etc.)
-  if (!(window as any).solana) {
-    throw new Error('Solana wallet extension not detected. Please install Phantom or Solflare.');
+/**
+ * Resolve the injected provider for a specific Solana wallet.
+ * Falls back to the generic `window.solana` provider.
+ */
+function getSolanaProvider(walletId?: string): any {
+  const w = window as any;
+  switch (walletId) {
+    case 'phantom':
+      return w.phantom?.solana || (w.solana?.isPhantom ? w.solana : undefined) || undefined;
+    case 'solflare':
+      return w.solflare || (w.solana?.isSolflare ? w.solana : undefined) || undefined;
+    case 'torus':
+      return w.torus || (w.solana?.isTorus ? w.solana : undefined) || undefined;
+    default:
+      return w.solana;
   }
+}
 
-  const solana = (window as any).solana;
-  
-  // Request connection
+/**
+ * Connect using an already-resolved provider object.
+ */
+async function connectWithProvider(provider: any, walletId: string): Promise<{ network: string; address: string }> {
   try {
     // For newer wallet APIs
-    if (typeof solana.request === 'function') {
-      await solana.request({ method: 'solana_requestAccounts' });
+    if (typeof provider.request === 'function') {
+      await provider.request({ method: 'solana_requestAccounts' });
+    } else if (typeof provider.connect === 'function') {
+      await provider.connect();
     } else {
-      // Legacy: try connect directly
-      await solana.connect();
+      throw new Error(`${walletId} provider does not expose connect`);
     }
-    
-    const accounts = await solana.getAccounts();
+
+    const accounts = await (provider.getAccounts
+      ? provider.getAccounts()
+      : provider.publicKey
+        ? [provider.publicKey.toString()]
+        : null);
+    if (!accounts || accounts.length === 0) {
+      throw new Error(`${walletId} returned no accounts`);
+    }
     const publicKey = new PublicKey(accounts[0]);
-    
+
     // Determine network (mainnet vs devnet vs testnet)
-    // Some wallets expose network info
     let network = 'Solana';
-    if (solana.isConnected) {
-      // Check if we're on a test/devnet
-      const cluster = await solana.getCluster();
+    if (provider.isConnected && typeof provider.getCluster === 'function') {
+      const cluster = await provider.getCluster();
       if (cluster === 'devnet' || cluster === 'testnet') {
         network = 'Solana ' + cluster.charAt(0).toUpperCase() + cluster.slice(1);
       }
     }
-    
+
     return {
       network,
       address: publicKey.toString(),
     };
   } catch (error) {
-    console.error('Solana connection failed:', error);
-    throw new Error(`Solana connection error: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`${walletId} connection failed:`, error);
+    throw new Error(`${walletId} connection error: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+export async function connectSolana(): Promise<{ network: string; address: string }> {
+  // Check for injected Solana provider (Phantom, Solflare, etc.)
+  const solana = (window as any).solana;
+  if (!solana) {
+    throw new Error('Solana wallet extension not detected. Please install Phantom or Solflare.');
+  }
+  return connectWithProvider(solana, 'Solana');
+}
+
+/**
+ * Connect to a *specific* Solana wallet (phantom, solflare, torus).
+ * Uses that wallet's own injected provider when installed; otherwise opens the
+ * wallet's in-browser web app (or install page) as a fallback.
+ */
+export async function connectSolanaWallet(
+  walletId: string,
+): Promise<{ network: string; address: string }> {
+  const provider = getSolanaProvider(walletId);
+  if (!provider) {
+    openWalletApp(walletId);
+    throw new Error(`${walletId} not detected — opened ${walletId}`);
+  }
+  return connectWithProvider(provider, walletId);
 }
 
 export async function disconnectSolana(): Promise<void> {
@@ -69,3 +114,4 @@ export function getAvailableSolanaWallets(): string[] {
   }
   return wallets;
 }
+

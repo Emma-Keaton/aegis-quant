@@ -1,12 +1,12 @@
-import React, { useState } from "react";
-import { connectEVM } from "../crypto/evmConnector";
-import { connectSolana } from "../crypto/solanaConnector";
+import React, { useState, useEffect } from "react";
+import { connectEVM, connectEVMWallet } from "../crypto/evmConnector";
+import { connectSolana, connectSolanaWallet } from "../crypto/solanaConnector";
+import { WALLET_APPS, EVM_FAST_LINKS, SOLANA_FAST_LINKS } from "../crypto/walletLinks";
 import { Link, Wallet as WalletIcon, Shield, Check, ExternalLink, HelpCircle, Eye, Trash2 } from "lucide-react";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useTonConnectUI } from "@tonconnect/ui-react";
 import WalletConnectUI from "./WalletConnectUI";
 import { UserState } from "../types";
+import { apiFetch } from "../api/client";
 
 interface WalletProps {
   userState: UserState;
@@ -15,7 +15,6 @@ interface WalletProps {
   onDisconnectExchange: (exchange: string) => void;
   onNavigateToLogs: () => void;
   networkOffline: boolean;
-  onUpdatePaperBalance?: (balance: number) => void;
 }
 
 export default function Wallet({ 
@@ -24,8 +23,7 @@ export default function Wallet({
   onLinkExchangeManual, 
   onDisconnectExchange, 
   onNavigateToLogs, 
-  networkOffline,
-  onUpdatePaperBalance 
+  networkOffline
 }: WalletProps) {
   const [fallbackNetwork, setFallbackNetwork] = useState<string>("TON");
   const [fallbackAddress, setFallbackAddress] = useState<string>("");
@@ -36,14 +34,64 @@ export default function Wallet({
   const [simulatedConnecting, setSimulatedConnecting] = useState<boolean>(false);
   const [connectionSuccess, setConnectionSuccess] = useState<boolean>(false);
 
-  const { openConnectModal } = useConnectModal();
+  // Live on-chain balance for the connected wallet (via /api/wallet/balance).
+  const [liveBalance, setLiveBalance] = useState<number | null>(null);
+  const [liveUsd, setLiveUsd] = useState<number | null>(null);
+  const [liveSymbol, setLiveSymbol] = useState<string>("");
+  const [spotMargin, setSpotMargin] = useState<boolean>(true);
+
+  // Load the Spot & Margin permission from the live risk settings.
+  useEffect(() => {
+    apiFetch("/api/risk")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (j && typeof j.spot_margin_enabled === "boolean") setSpotMargin(j.spot_margin_enabled); })
+      .catch(() => {});
+  }, []);
+
+  // Fetch the live balance whenever a wallet is connected.
+  useEffect(() => {
+    if (!userState.walletConnected || !userState.walletAddress) {
+      setLiveBalance(null); setLiveUsd(null); setLiveSymbol("");
+      return;
+    }
+    let cancelled = false;
+    const n = (userState.network || "").toLowerCase();
+    const net = userState.network === "TON"
+      ? "ton"
+      : n.includes("bsc") || n.includes("bnb") || n.includes("smart chain")
+        ? "bsc"
+        : n.includes("polygon") ? "polygon"
+          : n.includes("sol") ? "solana" : "evm";
+    apiFetch(`/api/wallet/balance?network=${net}&address=${encodeURIComponent(userState.walletAddress)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!cancelled && j && j.status === "success") {
+          setLiveBalance(j.balance ?? null);
+          setLiveUsd(j.usdEstimate ?? null);
+          setLiveSymbol(j.symbol || "");
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [userState.walletConnected, userState.walletAddress, userState.network]);
+
+  const toggleSpotMargin = async (val: boolean) => {
+    setSpotMargin(val);
+    try {
+      await apiFetch("/api/risk", { method: "PATCH", body: JSON.stringify({ spot_margin_enabled: val }) });
+    } catch (e) {
+      console.error("Failed to update spot/margin permission", e);
+    }
+  };
+
   const [tonConnectUI] = useTonConnectUI();
 
   const currency = userState.currency || "USD";
-  const nairaRate = userState.nairaRate || 1520;
+  const nairaRate = userState.nairaRate;
 
   const formatVal = (usdAmount: number) => {
     if (currency === "NGN") {
+      if (!nairaRate) return "₦—"; // live rate not loaded yet
       const ngnAmount = usdAmount * nairaRate;
       return `₦${ngnAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
@@ -52,7 +100,8 @@ export default function Wallet({
 
   const handleTonConnect = async () => {
     try {
-      await tonConnectUI.connectWallet();
+      // Fast-link straight to the TonKeeper app (native deep link via TonConnect).
+      await tonConnectUI.connectWallet({ tonkeeper: [] });
       // TonConnectUI handles the UI modal; after success we refresh state
       setConnectionSuccess(true);
     } catch (e) {
@@ -103,19 +152,27 @@ export default function Wallet({
     setApiKeySecret("");
   };
 
-  const handleFastConnectBybit = () => {
-    // Opens WalletConnect modal pre-filtered to Bybit Wallet
-    openConnectModal?.();
-  };
-
-  const handleFastConnectOKX = () => {
-    // Opens WalletConnect modal pre-filtered to OKX Wallet
-    openConnectModal?.();
-  };
-
-  const handleFastConnectBinance = () => {
-    // Opens WalletConnect modal pre-filtered to Binance Wallet
-    openConnectModal?.();
+  // Fast-link: connect through a *specific* wallet app (deep-link into its
+  // native/in-browser app), falling back to the wallet's install/own app page
+  // when the connector or injected provider isn't available.
+  const handleFastConnect = async (walletId: string) => {
+    if (networkOffline) return;
+    setSimulatedConnecting(true);
+    try {
+      const app = WALLET_APPS[walletId];
+      const result =
+        app?.chain === "solana"
+          ? await connectSolanaWallet(walletId)
+          : await connectEVMWallet(walletId);
+      await onConnectWallet(result.network, result.address);
+      setConnectionSuccess(true);
+    } catch (e) {
+      // Specific wallet not available -> the connector already opened the app.
+      console.error(`Failed to fast-connect ${walletId}:`, e);
+    } finally {
+      setSimulatedConnecting(false);
+      setTimeout(() => setConnectionSuccess(false), 3000);
+    }
   };
 
   return (
@@ -143,10 +200,14 @@ export default function Wallet({
           {userState.walletConnected && (
             <div className="text-right">
               <p className="text-lg font-black text-white">
-                {userState.network === "TON" ? `${userState.balance.toFixed(2)} TON` : "0.342 ETH"}
+                {liveBalance !== null
+                  ? `${liveBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${liveSymbol}`
+                  : "—"}
               </p>
               <p className="text-[10px] text-zinc-400">
-                {userState.network === "TON" ? `~${formatVal(userState.balance * 7.0)}` : `~${formatVal(1120.40)}`}
+                {liveUsd !== null
+                  ? `~${formatVal(liveUsd)}`
+                  : "Live balance unavailable"}
               </p>
             </div>
           )}
@@ -167,60 +228,8 @@ export default function Wallet({
         )}
       </div>
 
-      {/* Paper Trading Balance Adjuster */}
+      {/* Web3 wallet Connection triggers */}
       <WalletConnectUI />
-      {userState.tradeMode === "PAPER" && (
-        <div className="bg-[#1c2023] border border-[#c6ff34]/20 rounded-2xl p-5 space-y-4 animate-fade-in relative overflow-hidden">
-          <div className="absolute top-0 right-0 bg-[#c6ff34]/10 text-[#c6ff34] font-mono text-[8px] uppercase tracking-widest font-black px-2 py-1 rounded-bl-lg border-l border-b border-[#c6ff34]/20">
-            SIMULATION MODE
-          </div>
-          <div className="space-y-1">
-            <h3 className="font-sans text-xs font-black tracking-wider uppercase text-zinc-300">
-              SET PAPER TRADING BALANCE
-            </h3>
-            <p className="text-[11px] text-zinc-400 leading-relaxed">
-              You are currently running in <span className="text-[#c6ff34] font-bold">Paper Demo Trading</span>. Use the controls below to adjust your simulated Web3 wallet balance to test any size portfolio.
-            </p>
-          </div>
-          
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 flex items-center justify-between">
-              <span className="text-[10px] text-zinc-500 font-bold font-sans">PAPER BALANCE</span>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  min="0"
-                  max="1000000"
-                  step="1"
-                  value={userState.balance}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    if (onUpdatePaperBalance) {
-                      onUpdatePaperBalance(isNaN(val) ? 0 : val);
-                    }
-                  }}
-                  className="bg-transparent text-right text-sm font-black font-mono text-[#c6ff34] focus:outline-none w-28 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                />
-                <span className="text-[10px] text-[#c6ff34] font-black font-mono">{userState.network || "TON"}</span>
-              </div>
-            </div>
-
-            {/* Quick preset chips */}
-            <div className="grid grid-cols-3 gap-1">
-              {[100, 500, 1000, 5000, 10000, 50000].map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => onUpdatePaperBalance && onUpdatePaperBalance(preset)}
-                  className="px-2 py-1.5 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 hover:border-zinc-700 rounded-lg text-[9px] font-mono font-bold text-zinc-400 hover:text-[#c6ff34] transition-all cursor-pointer active:scale-95 text-center"
-                >
-                  {preset >= 1000 ? `${preset/1000}k` : preset}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Web3 wallet Connection triggers */}
       {/* Connected Networks Overview */}
@@ -255,6 +264,24 @@ export default function Wallet({
             >
               {simulatedConnecting ? "Connecting..." : "CONNECT VIA WALLETCONNECT"}
             </button>
+
+            {/* Specific EVM wallet fast links (incl. CeFi Web3 wallets) */}
+            <div className="flex flex-wrap gap-1.5">
+              {EVM_FAST_LINKS.map((wid) => {
+                const app = WALLET_APPS[wid];
+                return (
+                  <button
+                    key={wid}
+                    type="button"
+                    disabled={simulatedConnecting || networkOffline}
+                    onClick={() => handleFastConnect(wid)}
+                    className="px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 hover:border-[#c6ff34]/40 rounded-lg text-[9px] font-black uppercase tracking-wider text-zinc-300 hover:text-[#c6ff34] transition-all active:scale-95 cursor-pointer disabled:opacity-40"
+                  >
+                    {app.name}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
@@ -271,6 +298,24 @@ export default function Wallet({
           >
             CONNECT SOLANA WALLET
           </button>
+
+          {/* Specific Solana wallet fast links */}
+          <div className="flex flex-wrap gap-1.5">
+            {SOLANA_FAST_LINKS.map((wid) => {
+              const app = WALLET_APPS[wid];
+              return (
+                <button
+                  key={wid}
+                  type="button"
+                  disabled={simulatedConnecting || networkOffline}
+                  onClick={() => handleFastConnect(wid)}
+                  className="px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 hover:border-[#c6ff34]/40 rounded-lg text-[9px] font-black uppercase tracking-wider text-zinc-300 hover:text-[#c6ff34] transition-all active:scale-95 cursor-pointer disabled:opacity-40"
+                >
+                  {app.name}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -348,7 +393,7 @@ export default function Wallet({
               </button>
             ) : (
               <button
-                onClick={handleFastConnectBybit}
+                onClick={() => handleFastConnect("bybit")}
                 className="text-[10px] font-black uppercase text-[#101416] bg-[#c6ff34] px-3 py-1.5 rounded-lg hover:brightness-110 active:scale-95 transition-all shadow-md shadow-[#c6ff34]/15 cursor-pointer"
               >
                 FAST LINK
@@ -384,7 +429,7 @@ export default function Wallet({
               </button>
             ) : (
               <button
-                onClick={handleFastConnectOKX}
+                onClick={() => handleFastConnect("okx")}
                 className="text-[10px] font-black uppercase text-[#101416] bg-[#c6ff34] px-3 py-1.5 rounded-lg hover:brightness-110 active:scale-95 transition-all shadow-md shadow-[#c6ff34]/15 cursor-pointer"
               >
                 FAST LINK
@@ -420,7 +465,7 @@ export default function Wallet({
               </button>
             ) : (
               <button
-                onClick={handleFastConnectBinance}
+                onClick={() => handleFastConnect("binance")}
                 className="text-[10px] font-black uppercase text-[#101416] bg-[#c6ff34] px-3 py-1.5 rounded-lg hover:brightness-110 active:scale-95 transition-all shadow-md shadow-[#c6ff34]/15 cursor-pointer"
               >
                 FAST LINK
@@ -508,7 +553,7 @@ export default function Wallet({
                   <span className="text-xs font-bold text-white block">Enable Spot & Margin Trading</span>
                   <span className="text-[9px] text-zinc-500 block">Allows automated execution agent to place and cancel trade vectors</span>
                 </div>
-                <input type="checkbox" defaultChecked className="rounded border-zinc-800 bg-zinc-950 text-[#c6ff34] focus:ring-[#c6ff34]/30 accent-[#c6ff34]" />
+                <input type="checkbox" checked={spotMargin} onChange={(e) => toggleSpotMargin(e.target.checked)} className="rounded border-zinc-800 bg-zinc-950 text-[#c6ff34] focus:ring-[#c6ff34]/30 accent-[#c6ff34]" />
               </div>
 
               {/* strictly locked-out Disable Withdrawals warning */}

@@ -14,24 +14,7 @@ interface DashboardProps {
   onToggleNetworkOffline: (offline: boolean) => void;
 }
 
-const timeframeData: Record<string, { path: string; pts: { x: number; y: number }[] }> = {
-  "1D": {
-    path: "M 0 80 Q 50 120 100 50 T 200 130 T 300 90 T 400 30",
-    pts: [{ x: 0, y: 80 }, { x: 100, y: 50 }, { x: 200, y: 130 }, { x: 300, y: 90 }, { x: 400, y: 30 }]
-  },
-  "7D": {
-    path: "M 0 110 Q 50 40 100 90 T 200 60 T 300 40 T 400 15",
-    pts: [{ x: 0, y: 110 }, { x: 100, y: 90 }, { x: 200, y: 60 }, { x: 300, y: 40 }, { x: 400, y: 15 }]
-  },
-  "30D": {
-    path: "M 0 140 Q 50 90 100 110 T 200 70 T 300 50 T 400 5",
-    pts: [{ x: 0, y: 140 }, { x: 100, y: 110 }, { x: 200, y: 70 }, { x: 300, y: 50 }, { x: 400, y: 5 }]
-  },
-  "ALL": {
-    path: "M 0 150 Q 50 130 100 80 T 200 90 T 300 40 T 400 0",
-    pts: [{ x: 0, y: 150 }, { x: 100, y: 80 }, { x: 200, y: 90 }, { x: 300, y: 40 }, { x: 400, y: 0 }]
-  }
-};
+
 
 export default function Dashboard({ userState, onToggleAgent, onNavigateToStrategy, onNavigateToLogs, onPanic, backtestResult, networkOffline, onToggleNetworkOffline }: DashboardProps) {
   const [timeframe, setTimeframe] = useState<string>("1D");
@@ -40,7 +23,18 @@ export default function Dashboard({ userState, onToggleAgent, onNavigateToStrate
   const [panicState, setPanicState] = useState<"idle" | "armed" | "terminating">("idle");
 
   const currency = userState.currency || "USD";
-  const nairaRate = userState.nairaRate || 1520;
+  const nairaRate = userState.nairaRate;
+
+  // Derived analytics from real open positions (fallback to "—" when empty).
+  const positionPnl = (userState.positions || []).map((p) => ({
+    symbol: (p.pair || "").split("/")[0] || "—",
+    pnl: typeof p.pnl === "number" ? p.pnl : 0,
+  }));
+  const totalUnrealized = positionPnl.reduce((s, p) => s + p.pnl, 0);
+  const best = positionPnl.reduce((a, b) => (b.pnl > a.pnl ? b : a), { symbol: "—", pnl: 0 });
+  const worst = positionPnl.reduce((a, b) => (b.pnl < a.pnl ? b : a), { symbol: "—", pnl: 0 });
+  const largest = positionPnl.reduce((a, b) => (Math.abs(b.pnl) > Math.abs(a.pnl) ? b : a), { symbol: "—", pnl: 0 });
+  const hasPositions = positionPnl.length > 0;
 
   const handlePanicClick = () => {
     if (networkOffline) return; // Locked out when offline
@@ -57,13 +51,14 @@ export default function Dashboard({ userState, onToggleAgent, onNavigateToStrate
 
   const formatVal = (usdAmount: number) => {
     if (currency === "NGN") {
+      if (!nairaRate) return "₦—"; // live rate not loaded yet
       const ngnAmount = usdAmount * nairaRate;
       return `₦${ngnAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
     return `$${usdAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  const activeChart = timeframeData[timeframe] || timeframeData["1D"];
+  
 
   return (
     <div className="space-y-6 pb-24" id="dashboard_screen">
@@ -339,53 +334,56 @@ export default function Dashboard({ userState, onToggleAgent, onNavigateToStrate
               </div>
             </div>
 
-            {/* Performance Stats Cards */}
+            {/* Performance Stats Cards (real, derived from open positions) */}
             <div className="grid grid-cols-2 gap-2">
               <div className="bg-[#1c2023] border border-zinc-800/60 rounded-xl p-3">
                 <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Best Performer</p>
                 <div className="flex justify-between items-end mt-1.5">
-                  <span className="text-sm font-black text-white">SOL</span>
-                  <span className="text-[10px] font-bold font-mono bg-[#c6ff34]/10 text-[#c6ff34] px-1.5 py-0.5 rounded">+84%</span>
+                  <span className="text-sm font-black text-white">{best.symbol}</span>
+                  <span className="text-[10px] font-bold font-mono bg-[#c6ff34]/10 text-[#c6ff34] px-1.5 py-0.5 rounded">
+                    {hasPositions ? `${best.pnl >= 0 ? "+" : ""}$${best.pnl.toFixed(2)}` : "—"}
+                  </span>
                 </div>
               </div>
               <div className="bg-[#1c2023] border border-zinc-800/60 rounded-xl p-3">
                 <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Worst Performer</p>
                 <div className="flex justify-between items-end mt-1.5">
-                  <span className="text-sm font-black text-white">PEPE</span>
-                  <span className="text-[10px] font-bold font-mono bg-red-500/10 text-red-400 px-1.5 py-0.5 rounded">-12%</span>
+                  <span className="text-sm font-black text-white">{worst.symbol}</span>
+                  <span className="text-[10px] font-bold font-mono bg-red-500/10 text-red-400 px-1.5 py-0.5 rounded">
+                    {hasPositions ? `${worst.pnl >= 0 ? "+" : ""}$${worst.pnl.toFixed(2)}` : "—"}
+                  </span>
                 </div>
               </div>
               <div className="bg-[#1c2023] border border-zinc-800/60 rounded-xl p-3 col-span-2 flex justify-between items-center">
                 <div>
-                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Avg Gas Fee</p>
-                  <span className="text-base font-black font-mono text-white mt-1 block">$0.12</span>
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Total Unrealized PnL</p>
+                  <span className="text-base font-black font-mono mt-1 block text-[#c6ff34]">
+                    {hasPositions ? `${totalUnrealized >= 0 ? "+" : ""}${formatVal(totalUnrealized)}` : "—"}
+                  </span>
                 </div>
-                <button 
-                  onClick={onNavigateToLogs}
-                  className="text-xs text-[#c6ff34] hover:underline"
-                >
-                  View Gas Logs →
-                </button>
+                <button onClick={onNavigateToLogs} className="text-xs text-[#c6ff34] hover:underline">View Logs →</button>
               </div>
             </div>
 
-            {/* Efficiency Metrics */}
+            {/* Portfolio Metrics (real, derived) */}
             <div className="space-y-2">
-              <p className="text-xs font-bold uppercase text-zinc-400 tracking-wider">Efficiency Metrics</p>
+              <p className="text-xs font-bold uppercase text-zinc-400 tracking-wider">Portfolio Metrics</p>
               <div className="space-y-1.5">
                 <div className="bg-[#1c2023] border border-zinc-800/60 rounded-xl p-3 flex justify-between items-center">
                   <div>
-                    <h5 className="text-xs font-bold text-white">Jupiter DEX</h5>
-                    <p className="text-[10px] font-mono text-zinc-400">Daily Volume: $1.2M</p>
+                    <h5 className="text-xs font-bold text-white">Largest Position</h5>
+                    <p className="text-[10px] font-mono text-zinc-400">{largest.symbol}</p>
                   </div>
-                  <span className="text-xs font-bold font-mono text-[#c6ff34]">APY: 6.42%</span>
+                  <span className="text-xs font-bold font-mono text-[#c6ff34]">
+                    {hasPositions ? `${largest.pnl >= 0 ? "+" : ""}$${Math.abs(largest.pnl).toFixed(2)}` : "—"}
+                  </span>
                 </div>
                 <div className="bg-[#1c2023] border border-zinc-800/60 rounded-xl p-3 flex justify-between items-center">
                   <div>
-                    <h5 className="text-xs font-bold text-white">Kamino Finance</h5>
-                    <p className="text-[10px] font-mono text-zinc-400">Daily Volume: $450k</p>
+                    <h5 className="text-xs font-bold text-white">Open Positions</h5>
+                    <p className="text-[10px] font-mono text-zinc-400">Currently held by agent</p>
                   </div>
-                  <span className="text-xs font-bold font-mono text-[#c6ff34]">APY: 12.80%</span>
+                  <span className="text-xs font-bold font-mono text-[#c6ff34]">{hasPositions ? positionPnl.length : 0}</span>
                 </div>
               </div>
             </div>

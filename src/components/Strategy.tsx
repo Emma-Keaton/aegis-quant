@@ -12,7 +12,7 @@ interface StrategyProps {
   onToggleTradeMode: (mode: "PAPER" | "LIVE") => void;
   onResetSettings: () => void;
   currency: "USD" | "NGN";
-  nairaRate: number;
+  nairaRate: number | null;
   onToggleCurrency: (currency: "USD" | "NGN") => void;
   backtestResult?: {
     backtestCurve: any[];
@@ -21,6 +21,8 @@ interface StrategyProps {
     active: boolean;
   } | null;
   onUpdateBacktest: (result: any) => void;
+  balance: number;
+  onUpdateBalance: (balance: number) => void;
   networkOffline: boolean;
 }
 
@@ -36,6 +38,8 @@ export default function Strategy({
   onToggleCurrency,
   backtestResult,
   onUpdateBacktest,
+  balance,
+  onUpdateBalance,
   networkOffline
 }: StrategyProps) {
   // Local state for smooth real-time slider updates
@@ -50,6 +54,26 @@ export default function Strategy({
   const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
   const [understandRisks, setUnderstandRisks] = useState<boolean>(false);
   const [panicState, setPanicState] = useState<"idle" | "armed" | "terminating">("idle");
+
+  // Paper trading balance — stored internally in USD, but displayed/entered in
+  // the active Base Pricing Currency (USD or NGN via the live system rate).
+  const paperBalanceUsd = balance;
+  const paperBalanceDisplay =
+    currency === "NGN" && nairaRate
+      ? Math.round(paperBalanceUsd * nairaRate)
+      : paperBalanceUsd;
+
+  const handlePaperBalanceChange = (raw: string) => {
+    const val = parseFloat(raw);
+    if (isNaN(val) || val < 0) return;
+    const usd = currency === "NGN" && nairaRate ? val / nairaRate : val;
+    onUpdateBalance(Math.round(usd));
+  };
+
+  const setPaperBalance = (amount: number) => {
+    const usd = currency === "NGN" && nairaRate ? amount / nairaRate : amount;
+    onUpdateBalance(Math.round(usd));
+  };
 
   const handlePanicClick = () => {
     if (networkOffline) return;
@@ -398,7 +422,9 @@ export default function Strategy({
               <span className="text-[#c6ff34] font-bold">{currency === "NGN" ? "NIGERIAN NAIRA (₦)" : "US DOLLARS ($)"}</span>
             </span>
             <p className="text-[9px] text-zinc-500 font-mono mt-0.5">
-              Live Exchange Rate: 1 USD = ₦{nairaRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {nairaRate
+                ? `Live Exchange Rate: 1 USD = ₦${nairaRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : "Syncing live exchange rate…"}
             </p>
           </div>
           
@@ -436,7 +462,60 @@ export default function Strategy({
             </button>
           </div>
         </div>
-      </div>
+          {/* Paper Trading Balance — active only in PAPER mode, currency-aware */}
+          {tradeMode === "PAPER" && (
+            <div className="bg-[#1c2023] border border-[#c6ff34]/20 rounded-2xl p-5 space-y-4 relative overflow-hidden">
+              <div className="absolute top-0 right-0 bg-[#c6ff34]/10 text-[#c6ff34] font-mono text-[8px] uppercase tracking-widest font-black px-2 py-1 rounded-bl-lg border-l border-b border-[#c6ff34]/20">
+                SIMULATION MODE
+              </div>
+              <div className="space-y-1 pr-10">
+                <h3 className="font-sans text-xs font-black tracking-wider uppercase text-zinc-300">
+                  SET PAPER TRADING BALANCE
+                </h3>
+                <p className="text-[11px] text-zinc-400 leading-relaxed">
+                  Running in <span className="text-[#c6ff34] font-bold">Paper Demo Trading</span>. Set your simulated
+                  balance in <span className="font-mono text-[#c6ff34] font-bold">{currency === "NGN" ? "₦" : "$"}</span>
+                  {currency === "NGN" && nairaRate ? ` (1 USD = ₦${nairaRate.toLocaleString()})` : ""}.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 flex items-center justify-between">
+                  <span className="text-[10px] text-zinc-500 font-bold font-sans">PAPER BALANCE</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min="0"
+                      max="1000000"
+                      step="1"
+                      value={paperBalanceDisplay}
+                      onChange={(e) => handlePaperBalanceChange(e.target.value)}
+                      className="bg-transparent text-right text-sm font-black font-mono text-[#c6ff34] focus:outline-none w-28 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <span className="text-[10px] text-[#c6ff34] font-black font-mono">{currency === "NGN" ? "₦" : "$"}</span>
+                  </div>
+                </div>
+
+                {/* Quick preset chips */}
+                <div className="grid grid-cols-3 gap-1">
+                  {[100, 500, 1000, 5000, 10000, 50000].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setPaperBalance(preset)}
+                      className="px-2 py-1.5 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 hover:border-zinc-700 rounded-lg text-[9px] font-mono font-bold text-zinc-400 hover:text-[#c6ff34] transition-all cursor-pointer active:scale-95 text-center"
+                    >
+                      {preset >= 1000 ? `${preset / 1000}k` : preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-[9px] text-zinc-500 font-mono">
+                Stored in USD • shown in {currency === "NGN" ? "₦ NGN" : "$ USD"}{currency === "NGN" && nairaRate ? " @ live rate" : ""}.
+              </p>
+            </div>
+          )}
+        </div>
 
       {/* Sizing Section */}
       <div className="space-y-3">
@@ -799,7 +878,9 @@ export default function Strategy({
             />
             {currency === "NGN" && (
               <div className="text-right text-[10px] text-zinc-500 font-mono mt-0.5">
-                Calculated NGN: <span className="text-[#c6ff34] font-bold">₦{(backtestCap * nairaRate).toLocaleString("en-US", { maximumFractionDigits: 0 })}</span> (at 1 USD = ₦{nairaRate.toLocaleString()})
+                {nairaRate
+                  ? <>Calculated NGN: <span className="text-[#c6ff34] font-bold">₦{(backtestCap * nairaRate).toLocaleString("en-US", { maximumFractionDigits: 0 })}</span> (at 1 USD = ₦{nairaRate.toLocaleString()})</>
+                  : "Syncing live exchange rate…"}
               </div>
             )}
           </div>

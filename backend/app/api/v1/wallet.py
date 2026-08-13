@@ -261,3 +261,14 @@ async def test_cefi_connection(
         }
     except Exception as e:
         return {"success": False, "message": f"Connection failed: {str(e)}"}
+
+
+@router.get("/balance")
+async def wallet_balance(
+    network: str,
+    address: str,
+    user: dict = Depends(get_current_user),
+):
+    """Fetch a live on-chain balance for a connected wallet (TON/EVM/Solana)."""
+    from app.services.chain_balance import chain_balance
+    return await chain_balance(network, address)

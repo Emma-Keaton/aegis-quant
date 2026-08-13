@@ -26,7 +26,7 @@ export interface UserState {
   riskLimit: number;
   tradeMode: "PAPER" | "LIVE";
   currency: "USD" | "NGN";
-  nairaRate: number;
+  nairaRate: number | null;
   positions: Position[];
   connectedCeFi: {
     bybit: CeFiConnection;

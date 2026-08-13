@@ -128,17 +128,22 @@ async def fetch_market_data() -> Dict[str, Any]:
     Returns a dictionary with a UTC timestamp and a ``prices`` mapping:
     ``{"BTCUSDT": 30123.45, "ETHUSDT": 1850.12, ...}``.
     """
-    # Define the symbols we care about – you can extend this list as needed.
-    symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT", "DOTUSDT"]
+    # Watch the *active watchlist* so the feed tracks user changes; fall back to
+    # a default seed when the watchlist is empty.
+    from app.services.watchlist import get_watchlist_or_default
+    base = await get_watchlist_or_default()
+    symbols = [f"{s}USDT" for s in base]
     prices: Dict[str, float] = {}
     for sym in symbols:
-        price = await _fetch_price_from_coingecko(sym)
+        # Preference order: Binance (primary, free + reliable) →
+        # CoinGecko → Coinbase → CoinLore (fallbacks).
+        price = await _fetch_price_from_binance(sym)
         if price is None:
-            price = await _fetch_price_from_coinlore(sym)
+            price = await _fetch_price_from_coingecko(sym)
         if price is None:
             price = await _fetch_price_from_coinbase(sym)
         if price is None:
-            price = await _fetch_price_from_binance(sym)
+            price = await _fetch_price_from_coinlore(sym)
         if price is not None:
             prices[sym] = float(price)
     return {"timestamp": datetime.utcnow().isoformat() + "Z", "prices": prices}

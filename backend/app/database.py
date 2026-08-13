@@ -57,6 +57,15 @@ async def init_db() -> None:
     
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Idempotent migrations for columns added after the original table create.
+        # (Base.metadata.create_all ignores tables that already exist, so new
+        # columns must be added explicitly for Postgres.)
+        await conn.execute(__import__('sqlalchemy').text(
+            "ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS spot_margin_enabled BOOLEAN NOT NULL DEFAULT TRUE"
+        ))
+        await conn.execute(__import__('sqlalchemy').text(
+            "ALTER TABLE copytrade_subscriptions ADD COLUMN IF NOT EXISTS parser_llm VARCHAR(20)"
+        ))
         print("[DB] Tables created/verified successfully")
 
 

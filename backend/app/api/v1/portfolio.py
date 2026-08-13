@@ -60,7 +60,7 @@ async def get_portfolio_history(
         select(PaperBalance).where(PaperBalance.profile_id == profile.id)
     )
     paper_bal = paper_result.scalar_one_or_none()
-    baseline = float(paper_bal.balance) if paper_bal else 124.50
+    baseline = float(paper_bal.balance) if paper_bal else 0
     
     data = []
     cumulative = baseline
@@ -152,7 +152,7 @@ async def get_portfolio_stats(
         select(PaperBalance).where(PaperBalance.profile_id == profile.id)
     )
     paper_bal = paper_result.scalar_one_or_none()
-    balance = float(paper_bal.balance) if paper_bal else 124.50
+    balance = float(paper_bal.balance) if paper_bal else 0
     
     # Open positions
     from app.models import Position

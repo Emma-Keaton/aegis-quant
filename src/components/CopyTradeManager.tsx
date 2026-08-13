@@ -37,7 +37,7 @@ export default function CopyTradeManager() {
     try {
       const res = await apiFetch('/api/copytrade/register', {
         method: 'POST',
-        body: JSON.stringify({ channelId: newChannelId, confidenceThreshold: newThreshold }),
+        body: JSON.stringify({ channelId: newChannelId, confidenceThreshold: newThreshold, parserLlm: 'groq' }),
       });
       const json = await res.json();
       if (json.status !== 'success') throw new Error(json.error || 'Add failed');
@@ -79,8 +79,6 @@ export default function CopyTradeManager() {
 
   return (
     <div className="mt-6 space-y-4" id="copytrade_manager">
-        {/* Hidden default parser LLM (Gemini) */}
-        <input type="hidden" name="parserLLM" value="gemini" />
       <h3 className="text-sm font-bold text-[#c6ff34] uppercase">Copy‑Trade Channels</h3>
       {loading && <p className="text-xs text-zinc-400">Loading…</p>}
       {error && <p className="text-xs text-red-400">{error}</p>}

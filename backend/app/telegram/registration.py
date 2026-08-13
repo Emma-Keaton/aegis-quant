@@ -5,6 +5,7 @@ Called at API startup (web role) or manually via `python -m app.telegram.registr
 
 import asyncio
 import logging
+import os
 from typing import Optional
 
 import httpx
@@ -17,6 +18,38 @@ logger = logging.getLogger(__name__)
 def _api_url(path: str) -> str:
     settings = get_settings()
     return f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}{path}"
+
+
+def public_base_url(settings=None) -> str:
+    """Resolve the canonical public API base URL and force HTTPS.
+
+    Priority: RENDER_EXTERNAL_URL (Render provides this) → PUBLIC_URL →
+    API_PUBLIC_URL. Telegram only accepts HTTPS webhooks (except localhost), so
+    we rewrite an ``http://`` URL to ``https://`` unless the host is localhost.
+    """
+    settings = settings or get_settings()
+    base = (
+        os.getenv("RENDER_EXTERNAL_URL") or settings.PUBLIC_URL or settings.API_PUBLIC_URL or ""
+    ).strip().rstrip("/")
+    if not base:
+        return ""
+    if base.startswith("http://"):
+        base = "https://" + base[len("http://"):]
+    return base
+
+
+def webhook_url() -> Optional[str]:
+    """Build the HTTPS webhook URL for the bot, or None if it can't be HTTPS."""
+    base = public_base_url()
+    if not base:
+        return None
+    url = f"{base}/api/telegram/webhook"
+    # Telegram allows plain HTTP only for localhost/loopback.
+    if url.startswith("http://") and "localhost" not in base and "127.0.0.1" not in base:
+        url = "https://" + url[len("http://"):]
+    if not url.startswith("https://"):
+        return None
+    return url
 
 
 async def register_bot_commands() -> dict:
@@ -35,16 +68,21 @@ async def register_bot_commands() -> dict:
 
 
 async def register_webhook() -> dict:
-    """Point Telegram's webhook at the API service."""
+    """Point Telegram's webhook at the API service (HTTPS enforced)."""
     settings = get_settings()
     if not settings.TELEGRAM_BOT_TOKEN:
         logger.warning("TELEGRAM_BOT_TOKEN not set — skipping webhook registration")
         return {"ok": False, "description": "TELEGRAM_BOT_TOKEN not set"}
-    if not settings.API_PUBLIC_URL:
-        logger.warning("API_PUBLIC_URL not set — skipping webhook registration")
-        return {"ok": False, "description": "API_PUBLIC_URL not set"}
 
-    url = f"{settings.API_PUBLIC_URL.rstrip('/')}/api/telegram/webhook"
+    url = webhook_url()
+    if not url:
+        base = public_base_url(settings)
+        if not base:
+            logger.warning("No public base URL configured (PUBLIC_URL / API_PUBLIC_URL / RENDER_EXTERNAL_URL) — not registering webhook")
+            return {"ok": False, "description": "No public base URL configured"}
+        logger.warning(f"Refusing to register non-HTTPS webhook for base '{base}' (Telegram requires HTTPS)")
+        return {"ok": False, "description": f"Webhook URL must be HTTPS (got {base})"}
+
     payload = {
         "url": url,
         "secret_token": settings.TELEGRAM_WEBHOOK_SECRET or None,

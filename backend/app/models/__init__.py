@@ -285,6 +285,20 @@ class RiskSettings(Base):
     max_concurrent_trades = Column(Integer, default=3, nullable=False)
     max_daily_drawdown_pct = Column(Numeric(5, 2), default=5.0, nullable=False)
     whitelist_only = Column(Boolean, default=True, nullable=False)
+    spot_margin_enabled = Column(Boolean, default=True, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class TelegramLink(Base):
+    """Per-user link to a Telegram MTProto session (phone + OTP) for reading
+    private channels the user is a member of (auto-forward of signals)."""
+    __tablename__ = "telegram_links"
+
+    profile_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), primary_key=True)
+    phone = Column(String(30), nullable=True)
+    session_encrypted = Column(Text, nullable=True)  # AES-256 encrypted StringSession
+    status = Column(String(30), default="pending", nullable=False)  # pending | active
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
@@ -311,6 +325,7 @@ class CopyTradeSubscription(Base):
     profile_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
     channel_id = Column(String(50), nullable=False, index=True)
     confidence_threshold = Column(Integer, default=70, nullable=False)
+    parser_llm = Column(String(20), nullable=True)
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

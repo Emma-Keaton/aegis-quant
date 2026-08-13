@@ -22,7 +22,7 @@ const DEFAULT_USER_STATE: UserState = {
   riskLimit: 10,
   tradeMode: "PAPER",
   currency: "USD",
-  nairaRate: 1520,
+  nairaRate: null,
   positions: [],
   connectedCeFi: {
     bybit: { connected: false, encryptedKeys: null },
@@ -134,6 +134,24 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
     }
   };
 
+  // ── Exchange Rate Refresh ──────────────────────────────────────
+
+  // Refresh the live USD/NGN rate from the backend so it doesn't stay
+  // pinned to whatever value was fetched on first load. The backend caches
+  // the upstream rate, so repeated polls are cheap — this simply keeps the
+  // frontend in sync whenever the cached rate is updated.
+  const refreshNairaRate = async () => {
+    try {
+      const json = await apiJson<any>("/api/exchange-rate");
+      if (json && typeof json.nairaRate === "number") {
+        setUserState(prev => ({ ...prev, nairaRate: json.nairaRate }));
+      }
+    } catch (err) {
+      // Poll failed — keep the last known rate (server returns its cache on
+      // retry). Nothing to update here.
+    }
+  };
+
   // ── Connectivity Monitoring ───────────────────────────────────
 
   useEffect(() => {
@@ -169,6 +187,17 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
     if (!networkOffline) {
       fetchState();
     }
+  }, [networkOffline]);
+
+  // Periodically refresh the exchange rate so it updates over time instead of
+  // staying pinned to the initial value. Backend caches for 1h, so we poll a
+  // little more frequently to pick up fresh values as soon as they're cached.
+  // The interval only runs while online; when offline we keep the last known rate.
+  useEffect(() => {
+    if (networkOffline) return;
+    refreshNairaRate();
+    const id = setInterval(refreshNairaRate, 15 * 60 * 1000); // every 15 minutes
+    return () => clearInterval(id);
   }, [networkOffline]);
 
   // ── On Mount: init session + fetch data ────────────────────────
@@ -308,35 +337,6 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
     }
   };
 
-  const handleActivateSignalAgent = async (ticker: string, size: number) => {
-    try {
-      const res = await apiFetch("/api/logs", {
-        method: "POST",
-        body: JSON.stringify({
-          type: "BUY", pair: `${ticker}/USDT`, volume: `$${size.toFixed(2)}`, status: "Filled"
-        })
-      });
-      
-      // Optimistic position add — server will also create DB entry
-      const newPosition = {
-        id: String(Date.now()),
-        pair: `${ticker}/USDT`,
-        size,
-        pnl: 0,
-        buyPrice: 0,
-        currentPrice: 0,
-        logo: ticker.slice(0, 1).toUpperCase()
-      };
-      setUserState(prev => ({
-        ...prev,
-        positions: [...prev.positions, newPosition]
-      }));
-      setCurrentTab("home");
-    } catch (err) {
-      console.error("Failed to activate agent", err);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-[#101416] text-zinc-100 flex justify-center selection:bg-[#c6ff34] selection:text-black">
       <div className="w-full max-w-[480px] min-h-screen flex flex-col bg-[#171717] relative shadow-2xl shadow-black border-x border-zinc-900 px-4">
@@ -398,7 +398,6 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
                     onDisconnectExchange={handleDisconnectExchange}
                     onNavigateToLogs={() => setCurrentTab("logs")}
                     networkOffline={networkOffline}
-                    onUpdatePaperBalance={handleUpdatePaperBalance}
                   />
                 ) : (
                   <div className="h-[70vh] flex flex-col items-center justify-center space-y-3">
@@ -418,6 +417,8 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
                   onResetSettings={handleResetSettings}
                   currency={userState.currency}
                   nairaRate={userState.nairaRate}
+                  balance={userState.balance}
+                  onUpdateBalance={handleUpdatePaperBalance}
                   onToggleCurrency={handleToggleCurrency}
                   backtestResult={backtestResult}
                   onUpdateBacktest={setBacktestResult}
@@ -426,7 +427,7 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
               )}
               {currentTab === "intel" && (
                 <Intel 
-                  onActivateAgent={handleActivateSignalAgent} 
+                  agentActedTickers={userState.positions.map(p => (p.pair || "").split("/")[0].toUpperCase())}
                   networkOffline={networkOffline}
                 />
               )}
