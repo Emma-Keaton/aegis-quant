@@ -33,6 +33,8 @@ export interface UserState {
     okx: CeFiConnection;
     binance: CeFiConnection;
   };
+  onboardingCompleted: boolean;
+  onboardingPages: string[];
 }
 
 export interface RiskSettings {

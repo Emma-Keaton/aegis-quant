@@ -66,6 +66,12 @@ async def init_db() -> None:
         await conn.execute(__import__('sqlalchemy').text(
             "ALTER TABLE copytrade_subscriptions ADD COLUMN IF NOT EXISTS parser_llm VARCHAR(20)"
         ))
+        await conn.execute(__import__('sqlalchemy').text(
+            "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+        await conn.execute(__import__('sqlalchemy').text(
+            "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_pages TEXT NOT NULL DEFAULT '[]'"
+        ))
         print("[DB] Tables created/verified successfully")
 
 

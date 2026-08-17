@@ -52,6 +52,8 @@ class UserStateOut(BaseModel):
     nairaRate: Optional[float] = None
     positions: List[PositionItem] = []
     connectedCeFi: dict = {"bybit": {"connected": False, "encryptedKeys": None}, "okx": {"connected": False, "encryptedKeys": None}, "binance": {"connected": False, "encryptedKeys": None}}
+    onboardingCompleted: bool = False
+    onboardingPages: List[str] = []
 
 
 class RiskSettingsOut(BaseModel):
@@ -72,6 +74,16 @@ class RiskSettingsOut(BaseModel):
 # upstream, cached here, and refreshed when the cache expires.
 _NAIRA_CACHE: dict = {"rate": None, "fetched_at": 0.0}
 _NAIRA_CACHE_TTL = 3600  # 1 hour
+
+
+def _parse_onboarding_pages(raw) -> List[str]:
+    """Parse the Profile.onboarding_pages JSON list safely."""
+    import json
+    try:
+        data = json.loads(raw) if raw else []
+        return [p for p in data if isinstance(p, str)]
+    except Exception:
+        return []
 
 
 async def _get_or_create_profile(telegram_id: int, db: AsyncSession) -> Profile:
@@ -268,6 +280,8 @@ async def get_state(
             nairaRate=naira_rate,
             positions=positions,
             connectedCeFi=ceFi,
+            onboardingCompleted=bool(getattr(profile, "onboarding_completed", False)),
+            onboardingPages=_parse_onboarding_pages(getattr(profile, "onboarding_pages", "[]")),
         ),
         "riskSettings": risk.model_dump(),
     }

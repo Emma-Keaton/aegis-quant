@@ -85,6 +85,12 @@ class Profile(Base):
     # Engine B config
     engine_b_enabled = Column(Boolean, default=True, nullable=False)
     engine_b_min_confidence = Column(Numeric(3, 2), default=0.70)
+
+    # Onboarding (persisted per-page; reset only via Settings "Reset onboarding")
+    # onboarding_pages stores a JSON list of completed page keys, e.g.
+    # ["home", "wallet", "strategy", "intel", "logs"].
+    onboarding_completed = Column(Boolean, default=False, nullable=False)
+    onboarding_pages = Column(Text, default="[]", nullable=False)
     
     # Relationships
     credentials = relationship("UserCredential", back_populates="profile", cascade="all, delete-orphan")

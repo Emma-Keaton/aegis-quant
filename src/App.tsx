@@ -8,6 +8,7 @@ import Logs from "./components/Logs";
 import { setSessionToken, getSessionToken, clearSession, apiJson, apiFetch, getInitData, getApiBase } from "./api/client";
 import { Home, Wallet as WalletIcon, Sliders, Zap, History } from "lucide-react";
 import SkeletonLoader from "./components/SkeletonLoader";
+import OnboardingOverlay from "./components/OnboardingOverlay";
 
 const DEFAULT_USER_STATE: UserState = {
   walletConnected: false,
@@ -28,7 +29,9 @@ const DEFAULT_USER_STATE: UserState = {
     bybit: { connected: false, encryptedKeys: null },
     okx: { connected: false, encryptedKeys: null },
     binance: { connected: false, encryptedKeys: null }
-  }
+  },
+  onboardingCompleted: false,
+  onboardingPages: []
 };
 
 export default function App({ walletReady = true }: { walletReady?: boolean }) {
@@ -289,6 +292,28 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
     }
   };
 
+  const handlePageCompleted = (page: string) => {
+    setUserState((prev) => ({
+      ...prev,
+      onboardingPages: prev.onboardingPages.includes(page)
+        ? prev.onboardingPages
+        : [...prev.onboardingPages, page],
+      onboardingCompleted:
+        ["home", "wallet", "strategy", "intel", "logs"].every((p) =>
+          prev.onboardingPages.includes(p) || p === page
+        ),
+    }));
+  };
+
+  const handleResetOnboarding = async () => {
+    try {
+      await apiJson("/api/onboarding/reset", { method: "POST" });
+      setUserState((prev) => ({ ...prev, onboardingPages: [], onboardingCompleted: false }));
+    } catch (err) {
+      console.error("Reset onboarding failed", err);
+    }
+  };
+
   const handlePanic = async () => {
     setUserState(prev => ({ ...prev, positions: [], agentActive: false }));
     try {
@@ -423,6 +448,7 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
                   backtestResult={backtestResult}
                   onUpdateBacktest={setBacktestResult}
                   networkOffline={networkOffline}
+                  onResetOnboarding={handleResetOnboarding}
                 />
               )}
               {currentTab === "intel" && (
@@ -435,6 +461,15 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
             </>
           )}
         </div>
+
+        {/* Per-page onboarding tour (only for pages not yet completed) */}
+        {currentTab !== "admin" && (
+          <OnboardingOverlay
+            page={currentTab}
+            completedPages={userState.onboardingPages || []}
+            onPageCompleted={handlePageCompleted}
+          />
+        )}
 
         {/* Bottom Fixed Navigation Bar */}
         <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] h-[72px] bg-[#1c2023] border-t border-zinc-800 flex items-center justify-around px-2 z-50 shadow-2xl shadow-black rounded-t-2xl">

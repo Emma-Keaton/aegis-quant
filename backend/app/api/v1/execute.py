@@ -40,76 +40,99 @@ async def execute_trade(
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Execute a trade (paper or live based on user mode)"""
+    """Execute a trade (paper or live) through the unified ExecutionRouter.
+
+    Every route (API, copy-trade, bot, Engine A) runs the same prerequisites gate
+    first (paper: positive paper balance; live: agent enabled + Spot & Margin +
+    funded venue) and then routes to CEX / Solana DEX / TON as appropriate.
+    """
     telegram_id = user["id"]
     result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
     profile = result.scalar_one_or_none()
-    
+
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
-    
-    if profile.trading_mode == TradeMode.LIVE and not profile.bot_enabled:
-        raise HTTPException(status_code=400, detail="Live trading not enabled")
-    
-    # Enforce the Spot & Margin permission for live orders.
-    if profile.trading_mode == TradeMode.LIVE:
-        risk_result = await db.execute(
-            select(RiskSettings).where(RiskSettings.profile_id == profile.id)
+
+    # Unified pre-trade prerequisites gate (paper | live).
+    from app.services.trade_prerequisites import collect_prerequisites
+    prereqs = await collect_prerequisites(db, profile)
+    if prereqs:
+        raise HTTPException(status_code=400, detail="Prerequisites not met: " + "; ".join(prereqs))
+
+    # Determine venue from the request / connected wallet.
+    from app.engines.execution_router import ExecutionRouter
+    exchange_type = request.exchange_type
+    wallet_address = request.wallet_address
+    if exchange_type == "centralized":
+        net = (profile.wallet_network or "").lower() if profile.wallet_network else ""
+        if profile.wallet_connected and profile.wallet_address:
+            if "sol" in net:
+                exchange_type = "solana"
+            elif net in ("ton", "toncoin"):
+                exchange_type = "ton"
+            if exchange_type != "centralized":
+                wallet_address = profile.wallet_address
+
+    router = ExecutionRouter()
+    try:
+        exec_result = await router.execute(
+            profile=profile,
+            symbol=f"{request.symbol.upper().lstrip('$')}/USDT",
+            side=request.side,
+            size=request.size,
+            price=request.price or 0,
+            stop_loss=request.stop_loss,
+            take_profit=request.take_profit,
+            mode=profile.trading_mode.value,
+            exchange_type=exchange_type,
+            wallet_address=wallet_address,
         )
-        rs = risk_result.scalar_one_or_none()
-        if rs is not None and not rs.spot_margin_enabled:
-            raise HTTPException(status_code=400, detail="Spot & margin trading is disabled in Risk Settings")
-    
-    # Check max concurrent trades
-    positions_result = await db.execute(
-        select(Position).where(Position.profile_id == profile.id)
-    )
-    open_positions = positions_result.scalars().all()
-    
-    if len(open_positions) >= profile.max_concurrent_trades:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Max concurrent trades ({profile.max_concurrent_trades}) reached"
-        )
-    
-    # Create position
+    except Exception as e:
+        from fastapi import HTTPException as _HE
+        raise _HE(status_code=502, detail=f"Execution failed: {e}")
+
+    # Persist position + trade log (paper fills, live fills / pending-approval).
+    fill_price = float(exec_result.price) if exec_result and exec_result.price else float(request.price or 0)
+    symbol = request.symbol.upper().lstrip("$")
+
     position = Position(
         profile_id=profile.id,
-        symbol=request.symbol.upper(),
-        exchange=request.exchange,
+        symbol=symbol,
+        exchange=request.exchange if exchange_type == "centralized" else (exchange_type or request.exchange),
         side=OrderSide(request.side),
         size=request.size,
-        entry_price=request.price or 0,
-        current_price=request.price or 0,
+        entry_price=fill_price,
+        current_price=fill_price,
         stop_loss=request.stop_loss,
         take_profit=request.take_profit,
         mode=profile.trading_mode,
     )
     db.add(position)
-    
-    # Create trade log
+
+    is_filled = bool(exec_result and exec_result.executed)
     trade_log = TradeLog(
         profile_id=profile.id,
-        symbol=request.symbol.upper(),
-        exchange=request.exchange,
+        symbol=symbol,
+        exchange=request.exchange if exchange_type == "centralized" else exchange_type,
         side=OrderSide(request.side),
         execution_type=ExecutionType(profile.trading_mode.value),
         size=request.size,
-        price=request.price or 0,
-        total_value_usd=request.size * (request.price or 0),
-        status=OrderStatus.FILLED if profile.trading_mode == TradeMode.PAPER else OrderStatus.PENDING,
+        price=fill_price,
+        total_value_usd=request.size * fill_price,
+        status=OrderStatus.FILLED if (profile.trading_mode == TradeMode.PAPER or is_filled) else OrderStatus.PENDING,
+        tx_hash=getattr(exec_result, "tx_hash", None),
+        error_message=getattr(exec_result, "error", None),
     )
     db.add(trade_log)
-    
+
     await db.commit()
     await db.refresh(position)
     await db.refresh(trade_log)
-    
-    # Record metrics
+
     record_trade(position.symbol, position.side.value, position.exchange)
-    
+
     return ExecuteResponse(
-        executed=True,
+        executed=bool(is_filled),
         trade={
             "position_id": str(position.id),
             "symbol": position.symbol,
@@ -117,9 +140,12 @@ async def execute_trade(
             "size": float(position.size),
             "entry_price": float(position.entry_price),
             "mode": profile.trading_mode.value,
-        }
+            "route": getattr(exec_result, "route", exchange_type),
+            "status": getattr(exec_result, "status", trade_log.status.value),
+            "tx_hash": getattr(exec_result, "tx_hash", None),
+        },
+        reason=getattr(exec_result, "error", None),
     )
-
 
 @router.get("/positions")
 async def get_positions(

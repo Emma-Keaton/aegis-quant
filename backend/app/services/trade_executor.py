@@ -39,6 +39,12 @@ async def execute_parsed_signal(profile_id, parsed: dict, source: str = "copy-tr
         if profile.trading_mode == TradeMode.LIVE and not profile.bot_enabled:
             return {"executed": False, "reason": "Live trading not enabled", "signal": parsed}
 
+        # Unified pre-trade prerequisites gate (paper | live) — same as /api/execute.
+        from app.services.trade_prerequisites import collect_prerequisites
+        prereqs = await collect_prerequisites(db, profile)
+        if prereqs:
+            return {"executed": False, "reason": "Prerequisites not met: " + "; ".join(prereqs), "signal": parsed}
+
         size = float(parsed.get("size") or 0)
         if size <= 0:
             rs_result = await db.execute(

@@ -24,6 +24,7 @@ interface StrategyProps {
   balance: number;
   onUpdateBalance: (balance: number) => void;
   networkOffline: boolean;
+  onResetOnboarding: () => void;
 }
 
 export default function Strategy({
@@ -40,7 +41,8 @@ export default function Strategy({
   onUpdateBacktest,
   balance,
   onUpdateBalance,
-  networkOffline
+  networkOffline,
+  onResetOnboarding
 }: StrategyProps) {
   // Local state for smooth real-time slider updates
   const [allocation, setAllocation] = useState<number>(riskSettings.maxAllocation);
@@ -355,6 +357,23 @@ export default function Strategy({
           className="text-[10px] text-zinc-400 border border-zinc-800 bg-zinc-950 hover:bg-zinc-900 hover:text-red-400 hover:border-red-500/30 px-3 py-1.5 rounded-lg font-mono font-bold tracking-widest transition-all flex items-center gap-1.5 uppercase"
         >
           <span>↺</span> RESET TO DEFAULTS
+        </button>
+      </div>
+
+      {/* Onboarding tours reset (the ONLY place onboarding is reset) */}
+      <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-5 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">GUIDED TOURS</p>
+          <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
+            Replay the per-page onboarding tours (Home, Wallet, Settings, Intel, Logs).
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onResetOnboarding}
+          className="shrink-0 text-[10px] px-3 py-2 rounded-lg font-mono font-bold uppercase tracking-widest transition-all border border-zinc-700 text-[#c6ff34] hover:bg-[#c6ff34]/10 hover:border-[#c6ff34]/30 cursor-pointer"
+        >
+          RESET ONBOARDING TOURS
         </button>
       </div>
 
