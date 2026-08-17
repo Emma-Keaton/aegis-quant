@@ -254,27 +254,44 @@ class ExecutionRouter:
         take_profit: Optional[float],
         wallet_address: Optional[str] = None,
     ) -> ExecutionResult:
-        """Execute a live trade on TON (distinct venue from CEX).
+        """Execute a live trade on TON via the user's connected Ton Connect wallet.
 
-        Broadcasts a real TON transfer only when a server-side TON wallet is
-        configured (TON_PRIVATE_KEY / TON_MNEMONIC). Otherwise raises a clear
-        error instead of silently routing TON to a Centralized Exchange.
+        Per-trade user approval (option A): build an unsigned transfer request for
+        the user's *own* connected wallet and return it as a `pending_approval`
+        result. The Mini App surfaces it to tonConnectUI.sendTransaction(...),
+        the user approves in their wallet app, and the signed boc is broadcast +
+        persisted by the caller. No server-side TON key is required for user trades.
         """
-        import os
+        from app.services.ton_trade import build_transfer_messages
         from app.core.exceptions import ExchangeError
 
         if not wallet_address:
-            raise ExchangeError("TON execution requires a recipient wallet_address", "TON")
-        if not (os.getenv("TON_PRIVATE_KEY") or os.getenv("TON_MNEMONIC")):
             raise ExchangeError(
-                "TON live execution requires a configured server TON wallet "
-                "(set TON_PRIVATE_KEY or TON_MNEMONIC) — not wired yet", "TON"
+                "TON trading requires a connected Ton Connect wallet address", "TON"
             )
 
-        # Once a TON server wallet is configured, build + broadcast the transfer
-        # here (route="dex_ton"). Left explicit so we never fall back to CEX.
-        raise ExchangeError(
-            "TON live broadcast not yet implemented (server TON wallet not configured)", "TON"
+        # The user's own wallet is the signer + source of funds. For a plain
+        # transfer the recipient is the user themselves (a real DEX swap would set
+        # the recipient to the AMM/router contract address - extend here).
+        request = build_transfer_messages(
+            recipient=wallet_address,
+            amount_ton=float(size or 0),
+            comment=f"{side.upper()} {symbol}",
+        )
+
+        # Soft-return the unsigned request; the caller persists + prompts approval.
+        return ExecutionResult(
+            executed=False,
+            side=side,
+            symbol=symbol,
+            size=size,
+            price=price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            route="dex_ton",
+            status="pending_approval",
+            tx_hash=None,
+            error="TON approval required - approve in your wallet",
         )
 
     async def _execute_live(

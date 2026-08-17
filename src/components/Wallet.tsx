@@ -175,6 +175,72 @@ export default function Wallet({
     }
   };
 
+  // ── Per-user TON trading (per-trade approval via Ton Connect) ─────────────
+  const [tonTradeAmount, setTonTradeAmount] = useState<string>("");
+  const [tonTradeBusy, setTonTradeBusy] = useState<boolean>(false);
+  const [tonTradeMsg, setTonTradeMsg] = useState<string | null>(null);
+  const [tonTradeErr, setTonTradeErr] = useState<string | null>(null);
+
+  const handleTonTrade = async (symbol: string, side: "buy" | "sell") => {
+    if (!userState.walletConnected || !userState.walletAddress) {
+      setTonTradeErr("Connect a TON wallet first");
+      return;
+    }
+    const amount = parseFloat(tonTradeAmount);
+    if (!amount || amount <= 0) {
+      setTonTradeErr("Enter a TON amount greater than 0");
+      return;
+    }
+    setTonTradeBusy(true);
+    setTonTradeMsg(null);
+    setTonTradeErr(null);
+    try {
+      // 1) Ask the backend for an unsigned TonConnect transfer request.
+      const build = await apiFetch("/api/wallet/ton/build", {
+        method: "POST",
+        body: JSON.stringify({
+          address: userState.walletAddress,
+          amount,
+          comment: `${side.toUpperCase()} ${symbol} (Aegis Quant)`,
+        }),
+      });
+      const buildJson = await build.json();
+      if (!build.ok || !buildJson.ok) {
+        setTonTradeErr(buildJson.detail || buildJson.message || "Failed to build TON transfer");
+        return;
+      }
+
+      // 2) Approve in the user's own wallet app (Tonkeeper/Tonhub/...).
+      const signed = await tonConnectUI.sendTransaction({
+        validUntil: buildJson.validUntil,
+        messages: buildJson.messages,
+      });
+
+      // 3) Broadcast the signed boc and persist the trade.
+      const broadcast = await apiFetch("/api/wallet/ton/broadcast", {
+        method: "POST",
+        body: JSON.stringify({
+          boc: typeof signed === "string" ? signed : (signed as any)?.boc,
+          symbol,
+          side,
+          size: amount,
+          price: 0,
+        }),
+      });
+      const broadcastJson = await broadcast.json();
+      if (!broadcast.ok) {
+        setTonTradeErr(broadcastJson.detail || "Broadcast failed");
+        return;
+      }
+      setTonTradeMsg(`TON ${side.toUpperCase()} approved & broadcast — ${broadcastJson.tx_hash}`);
+      setTonTradeAmount("");
+    } catch (e: any) {
+      setTonTradeErr(e?.message ? String(e.message) : "TON trade cancelled or failed");
+    } finally {
+      setTonTradeBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-24" id="wallet_screen">
       {/* Title */}
@@ -250,6 +316,40 @@ export default function Wallet({
             >
               {simulatedConnecting ? "Authorizing..." : connectionSuccess ? "TON Wallet Connected!" : "CONNECT TON KEEPER / WALLET"}
             </button>
+
+            {/* Per-user TON trade (approve in your own wallet) — only when TON is connected */}
+            {userState.walletConnected && (userState.network || "").toLowerCase().includes("ton") && (
+              <div className="pt-3 border-t border-zinc-800 space-y-2">
+                <p className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">
+                  TRADE TON (APPROVE IN YOUR WALLET)
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    value={tonTradeAmount}
+                    onChange={(e) => setTonTradeAmount(e.target.value)}
+                    placeholder="TON amount"
+                    inputMode="decimal"
+                    className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white p-2.5 placeholder-zinc-600 focus:outline-none focus:border-[#c6ff34]"
+                  />
+                  <button
+                    disabled={tonTradeBusy}
+                    onClick={() => handleTonTrade("TON", "buy")}
+                    className="bg-[#c6ff34]/10 text-[#c6ff34] border border-[#c6ff34]/20 font-black text-[10px] px-3 rounded-xl hover:bg-[#c6ff34]/20 transition-all uppercase cursor-pointer disabled:opacity-40"
+                  >
+                    {tonTradeBusy ? "..." : "SEND"}
+                  </button>
+                </div>
+                {tonTradeMsg && (
+                  <p className="text-[11px] text-[#c6ff34] bg-[#c6ff34]/10 border border-[#c6ff34]/20 rounded-lg px-3 py-2 break-all">{tonTradeMsg}</p>
+                )}
+                {tonTradeErr && (
+                  <p className="text-[11px] text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{tonTradeErr}</p>
+                )}
+                <p className="text-[9px] text-zinc-500">
+                  Your Tonkeeper/Tonhub app will pop up for approval. Funds stay in your wallet — you approve each send.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
