@@ -60,6 +60,16 @@ services:
         value: https://api.mainnet-beta.solana.com
       - key: WALLET_CONNECT_PROJECT_ID
         sync: false
+      - key: CMC_API_KEY
+        sync: false
+      - key: RAYDIUM_RPC_URL
+        value: https://api.mainnet-beta.solana.com
+      - key: TRENDING_POLL_SECONDS
+        value: "300"
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
       - key: KRONOS_SERVICE_URL
         fromService:
           name: aegis-quant-kronos
@@ -110,6 +120,18 @@ services:
         sync: false
       - key: REDIS_URL
         sync: false
+      - key: CMC_API_KEY
+        sync: false
+      - key: RAYDIUM_RPC_URL
+        value: https://api.mainnet-beta.solana.com
+      - key: TRENDING_POLL_SECONDS
+        value: "300"
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: AUTO_CONFIDENCE_THRESHOLD
+        value: "75"
 
   # ── Kronos (AI forecasting, deployed separately) ─────────────────
   - type: web
