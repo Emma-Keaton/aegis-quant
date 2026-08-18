@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
+    # Market data sources (CoinMarketCap requires a key; Raydium is public read)
+    CMC_API_KEY: str = ""
+    RAYDIUM_RPC_URL: str = "https://api.mainnet-beta.solana.com"
+    TRENDING_POLL_SECONDS: int = 300  # trending bucket refresh interval (5 min)
+
     # Scraper Accounts
     TWITTER_ACCOUNTS_JSON: str = "[]"
     TELEGRAM_API_ID: int = 0

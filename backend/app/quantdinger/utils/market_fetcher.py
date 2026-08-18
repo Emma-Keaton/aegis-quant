@@ -122,6 +122,73 @@ async def _fetch_price_from_binance(symbol: str) -> Any:
             return None
     return None
 
+
+# ── CoinMarketCap + Raydium fetchers (market-data + memecoin intelligence) ──
+
+CMC_API = "https://pro-api.coinmarketcap.com/v1"
+
+async def _fetch_price_from_cmc(symbol: str) -> Any:
+    """Fetch price from CoinMarketCap (requires CMC_API_KEY).
+
+    Returns ``None`` if no key or the symbol cannot be resolved.
+    """
+    from app.config import get_settings
+    key = get_settings().CMC_API_KEY
+    if not key:
+        return None
+    base = symbol.upper().split("USDT")[0].split("USD")[0]
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.get(
+                f"{CMC_API}/cryptocurrency/quotes/latest",
+                params={"symbol": base},
+                headers={"X-CMC_PRO_API_KEY": key, "Accept": "application/json"},
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", {})
+            entry = data.get(base, data.get(base.upper(), {}))
+            if isinstance(entry, dict):
+                quote = entry.get("quote", {}).get("USD", {})
+                price = quote.get("price")
+                if price:
+                    return float(price)
+        except Exception:
+            return None
+    return None
+
+
+async def _fetch_price_from_raydium(base: str) -> Any:
+    """Fetch a memecoin price from Raydium (Solana DEX).
+
+    ``base`` should be a memecoin ticker like BONK / WIF / POPCAT. Uses the
+    Raydium v2 pools endpoint and matches by base symbol. Returns ``None`` on miss.
+    """
+    base = base.upper()
+    # Raydium pool lookup uses token mints; symbol→mint mapping for known memecoins.
+    _MEME_MINTS = {
+        "BONK": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xgiBp9R6zUMk9F",
+        "WIF": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+        "POPCAT": "7GCihgDB8fe6KNkn2vH7a4y1mUjT6p4YXn8B5vS9Qp2W",
+        "PEPE": "AfhpGGbv9m6G2xReQbtFqajA2LYNg4nPrkQ7Jp4rQBJp",
+    }
+    mint = _MEME_MINTS.get(base)
+    if not mint:
+        return None
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            # Raydium v2 API pools list (top liquidity) — parse for matching mint.
+            resp = await client.get("https://api-v3.raydium.io/v2/sdk/liquidity/mainnet.json")
+            resp.raise_for_status()
+            data = resp.json()
+            for pool in data:
+                if pool.get("baseMint") == mint or pool.get("baseVaultMint") == mint:
+                    price = pool.get("price")
+                    if price:
+                        return float(price)
+        except Exception:
+            return None
+    return None
+
 async def fetch_market_data() -> Dict[str, Any]:
     """Collect a snapshot of market prices.
 
@@ -135,11 +202,15 @@ async def fetch_market_data() -> Dict[str, Any]:
     symbols = [f"{s}USDT" for s in base]
     prices: Dict[str, float] = {}
     for sym in symbols:
-        # Preference order: Binance (primary, free + reliable) →
-        # CoinGecko → Coinbase → CoinLore (fallbacks).
+        # Preference order: Binance → CoinMarketCap → CoinGecko → Raydium →
+        # Coinbase → CoinLore (fallback chain; Raydium covers memecoins).
         price = await _fetch_price_from_binance(sym)
         if price is None:
+            price = await _fetch_price_from_cmc(sym)
+        if price is None:
             price = await _fetch_price_from_coingecko(sym)
+        if price is None:
+            price = await _fetch_price_from_raydium(sym.split("USDT")[0])
         if price is None:
             price = await _fetch_price_from_coinbase(sym)
         if price is None:

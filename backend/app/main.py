@@ -44,6 +44,7 @@ from app.api.v1.sources import router as sources_router
 from app.api.v1.config import router as config_router
 from app.api.v1.portfolio import router as portfolio_router
 from app.api.v1.onboarding import router as onboarding_router
+from app.api.v1.trending import router as trending_router
 
 # ── Logging ───────────────────────────────────────────────────────
 
@@ -112,6 +113,15 @@ async def lifespan(app: FastAPI):
         logger.info("[AEGIS] QuantDinger market fetcher started")
     except Exception as e:
         logger.warning(f"[AEGIS] QuantDinger market fetcher start failed: {e}")
+
+    # Start the trending tokens poller (CMC -> CoinGecko -> Raydium) in non-web roles.
+    if not is_web:
+        try:
+            from app.services.trending import start_trending_poller
+            app.state.trending_task = start_trending_poller()
+            logger.info("[AEGIS] Trending tokens poller started")
+        except Exception as e:
+            logger.warning(f"[AEGIS] Trending poller start failed: {e}")
     yield
 
     # Stop engines
@@ -127,6 +137,14 @@ async def lifespan(app: FastAPI):
         from app.services.market_hub import stop_market_feed
         await stop_market_feed()
         logger.info("[AEGIS] Market feed stopped")
+    except Exception:
+        pass
+
+    # Stop trending tokens poller
+    try:
+        from app.services.trending import stop_trending_poller
+        await stop_trending_poller()
+        logger.info("[AEGIS] Trending poller stopped")
     except Exception:
         pass
 
@@ -248,6 +266,7 @@ def create_app() -> FastAPI:
     app.include_router(config_router)   # Public app config
     app.include_router(portfolio_router)  # Portfolio history & stats
     app.include_router(onboarding_router)  # Per-page onboarding tours
+    app.include_router(trending_router)  # Trending tokens bucket
     # Metrics API
     from app.api.v1.metrics import router as metrics_router
     app.include_router(metrics_router)

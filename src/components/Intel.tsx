@@ -136,6 +136,50 @@ export default function Intel({ agentActedTickers, networkOffline }: IntelProps)
     }
   };
 
+  // ── Trending tokens (separate bucket from the watchlist) ────────────────
+  interface TrendingItem {
+    ticker: string;
+    symbol: string;
+    source: string;
+    rank?: number;
+    price?: number | null;
+    change_24h?: number | null;
+    volume_24h?: number | null;
+    market_cap?: number | null;
+  }
+  const [watchBusy, setWatchBusy] = useState<string | null>(null);
+  const { data: trendingData } = useQuery({
+    queryKey: ["trending"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/trending");
+      if (!res.ok) return { tickers: [] as TrendingItem[], updated: null };
+      const json = await res.json();
+      return json.data || { tickers: [] as TrendingItem[], updated: null };
+    },
+    refetchInterval: 300000, // refresh every 5 min to match backend poller
+  });
+  const trending: TrendingItem[] = trendingData?.tickers || [];
+
+  const handleWatchTrending = async (ticker: string) => {
+    if (!ticker || networkOffline) return;
+    setWatchBusy(ticker);
+    try {
+      await apiJson("/api/whitelist", {
+        method: "POST",
+        body: JSON.stringify({
+          symbol: ticker.replace("$", "").toUpperCase(),
+          exchange: "bybit",
+          timeframe: "1m",
+        }),
+      });
+      queryClient.invalidateQueries({ queryKey: ["whitelist"] });
+    } catch (err) {
+      console.error("Failed to watch trending token:", err);
+    } finally {
+      setWatchBusy(null);
+    }
+  };
+
   const signals: MarketSignal[] = signalsData || [];
   const sources: Source[] = sourcesData?.sources || [];
 
@@ -414,6 +458,61 @@ export default function Intel({ agentActedTickers, networkOffline }: IntelProps)
             </div>
           )}
         </div>
+      </div>
+
+      {/* Trending tokens — separate bucket from the watchlist (CMC → CoinGecko → Raydium) */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <p className="text-[10px] uppercase tracking-widest text-[#c6ff34] font-black flex items-center gap-1.5">
+            <Flame className="w-3.5 h-3.5" /> TRENDING
+          </p>
+          <span className="text-[9px] font-mono text-zinc-500">
+            {trending.length} HOT
+          </span>
+        </div>
+        <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl overflow-hidden">
+          {trending.length === 0 ? (
+            <p className="text-xs text-zinc-500 text-center py-6 px-4">
+              Polling trending tokens (CoinMarketCap → CoinGecko → Raydium)... check back in a moment.
+            </p>
+          ) : (
+            <div className="divide-y divide-zinc-800">
+              {trending.slice(0, 25).map((t, i) => (
+                <div key={`${t.ticker}-${i}`} className="flex items-center justify-between gap-2 px-4 py-2.5 hover:bg-zinc-900/40 transition-all">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[9px] font-mono text-zinc-600 w-5 text-right">{i + 1}</span>
+                    <span className="text-xs font-bold text-white truncate">{t.ticker}</span>
+                    <span className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-zinc-500">
+                      {t.source}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {typeof t.price === "number" && (
+                      <span className="text-[10px] font-mono text-zinc-400">
+                        ${t.price < 1 ? t.price.toPrecision(4) : t.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      </span>
+                    )}
+                    {typeof t.change_24h === "number" && (
+                      <span className={`text-[10px] font-mono font-bold ${t.change_24h >= 0 ? "text-[#c6ff34]" : "text-red-400"}`}>
+                        {t.change_24h >= 0 ? "+" : ""}{t.change_24h.toFixed(1)}%
+                      </span>
+                    )}
+                    <button
+                      onClick={() => handleWatchTrending(t.ticker)}
+                      disabled={watchBusy === t.ticker}
+                      className="text-[8px] font-black uppercase px-2 py-1 rounded-md border border-[#c6ff34]/30 text-[#c6ff34] hover:bg-[#c6ff34]/10 transition-all cursor-pointer disabled:opacity-40"
+                    >
+                      {watchBusy === t.ticker ? "..." : "WATCH"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <p className="text-[9px] text-zinc-500 px-1">
+          Trending is separate from your watchlist. Tap WATCH to promote a token onto your watchlist.
+        </p>
       </div>
     </div>
   );
