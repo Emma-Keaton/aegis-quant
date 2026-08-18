@@ -106,3 +106,69 @@ def map_wallet_network(network: str) -> str:
     if "polygon" in n:
         return "polygon"
     return "evm"
+
+
+# Known Solana memecoin token mints (symbol -> mint). Used by the RPC token
+# balance helper so memecoin balances can be read accurately via the public RPC.
+SOLANA_MEME_MINTS = {
+    "BONK": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xgiBp9R6zUMk9F",
+    "WIF": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+    "POPCAT": "7GCihgDB8fe6KNkn2vH7a4y1mUjT6p4YXn8B5vS9Qp2W",
+    "PEPE": "AfhpGGbv9m6G2xReQbtFqajA2LYNg4nPrkQ7Jp4rQBJp",
+}
+
+# Token decimals per known mint (used to convert raw lamport-style amounts).
+SOLANA_MEME_DECIMALS = {
+    "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xgiBp9R6zUMk9F": 5,
+    "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm": 6,
+    "7GCihgDB8fe6KNkn2vH7a4y1mUjT6p4YXn8B5vS9Qp2W": 6,
+    "AfhpGGbv9m6G2xReQbtFqajA2LYNg4nPrkQ7Jp4rQBJp": 6,
+}
+
+
+async def solana_meme_balance(wallet: str, symbol: str) -> dict:
+    """Read a memecoin (SPL token) balance for a Solana wallet via public RPC.
+
+    Uses ``getTokenAccountsByOwner`` and parses the ``jsonParsed`` schema. Returns
+    ``{status, symbol, mint, balance, decimals}`` or ``{status: "error", ...}``.
+    """
+    import httpx
+
+    symbol = symbol.upper()
+    mint = SOLANA_MEME_MINTS.get(symbol)
+    if not mint:
+        return {"status": "error", "symbol": symbol, "message": f"Unknown Solana memecoin: {symbol}"}
+
+    rpc_url = "https://api.mainnet-beta.solana.com"
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getTokenAccountsByOwner",
+        "params": [
+            wallet,
+            {"mint": mint},
+            {"encoding": "jsonParsed"},
+        ],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(rpc_url, json=body)
+            r.raise_for_status()
+            result = r.json().get("result", {}) or {}
+            accounts = result.get("value", [])
+            total = 0
+            for acc in accounts:
+                info = acc.get("account", {}).get("data", {}).get("parsed", {}).get("info", {})
+                raw = int(info.get("tokenAmount", {}).get("amount", 0) or 0)
+                decimals = info.get("tokenAmount", {}).get("decimals") or SOLANA_MEME_DECIMALS.get(mint, 9)
+                total += raw / (10 ** decimals)
+        return {
+            "status": "success",
+            "symbol": symbol,
+            "mint": mint,
+            "balance": round(total, 8),
+            "decimals": SOLANA_MEME_DECIMALS.get(mint, 9),
+        }
+    except Exception as e:
+        logger.warning("Solana meme balance failed %s %s: %s", wallet, symbol, e)
+        return {"status": "error", "symbol": symbol, "message": str(e)}

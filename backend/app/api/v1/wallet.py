@@ -267,10 +267,20 @@ async def test_cefi_connection(
 async def wallet_balance(
     network: str,
     address: str,
+    symbol: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
-    """Fetch a live on-chain balance for a connected wallet (TON/EVM/Solana)."""
-    from app.services.chain_balance import chain_balance
+    """Fetch a live on-chain balance for a connected wallet (TON/EVM/Solana).
+
+    For Solana memecoins (BONK/WIF/POPCAT/PEPE) pass ``symbol`` to read the SPL
+    token balance via the public RPC instead of the native SOL balance.
+    """
+    from app.services.chain_balance import chain_balance, solana_meme_balance
+    if (network or "").lower() in ("solana", "sol") and symbol:
+        res = await solana_meme_balance(address, symbol)
+        if res.get("status") == "success":
+            return res
+        # Fall through to native balance if the meme lookup fails.
     return await chain_balance(network, address)
 @router.post("/ton/build")
 async def ton_build_transfer(

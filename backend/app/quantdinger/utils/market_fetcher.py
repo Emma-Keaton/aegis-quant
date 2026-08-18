@@ -123,9 +123,10 @@ async def _fetch_price_from_binance(symbol: str) -> Any:
     return None
 
 
-# ── CoinMarketCap + Raydium fetchers (market-data + memecoin intelligence) ──
+# CoinMarketCap + Raydium + DexScreener fetchers (market-data + memecoin intelligence)
 
 CMC_API = "https://pro-api.coinmarketcap.com/v1"
+DEXSCREENER_API = "https://api.dexscreener.com"
 
 async def _fetch_price_from_cmc(symbol: str) -> Any:
     """Fetch price from CoinMarketCap (requires CMC_API_KEY).
@@ -158,13 +159,12 @@ async def _fetch_price_from_cmc(symbol: str) -> Any:
 
 
 async def _fetch_price_from_raydium(base: str) -> Any:
-    """Fetch a memecoin price from Raydium (Solana DEX).
+    """Fetch a memecoin price from Raydium (Solana DEX; best-effort).
 
     ``base`` should be a memecoin ticker like BONK / WIF / POPCAT. Uses the
-    Raydium v2 pools endpoint and matches by base symbol. Returns ``None`` on miss.
+    Raydium pool endpoint and matches by base mint. Returns ``None`` on miss.
     """
     base = base.upper()
-    # Raydium pool lookup uses token mints; symbol→mint mapping for known memecoins.
     _MEME_MINTS = {
         "BONK": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xgiBp9R6zUMk9F",
         "WIF": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
@@ -176,7 +176,6 @@ async def _fetch_price_from_raydium(base: str) -> Any:
         return None
     async with httpx.AsyncClient(timeout=10) as client:
         try:
-            # Raydium v2 API pools list (top liquidity) — parse for matching mint.
             resp = await client.get("https://api-v3.raydium.io/v2/sdk/liquidity/mainnet.json")
             resp.raise_for_status()
             data = resp.json()
@@ -188,6 +187,44 @@ async def _fetch_price_from_raydium(base: str) -> Any:
         except Exception:
             return None
     return None
+
+
+async def _fetch_price_from_dexscreener(base: str) -> Any:
+    """Fetch a price from DexScreener (free, no key) for the given Solana token
+    mint. Provides accurate memecoin prices + liquidity/volume intelligence.
+    """
+    base = base.upper()
+    _MEME_MINTS = {
+        "BONK": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xgiBp9R6zUMk9F",
+        "WIF": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+        "POPCAT": "7GCihgDB8fe6KNkn2vH7a4y1mUjT6p4YXn8B5vS9Qp2W",
+        "PEPE": "AfhpGGbv9m6G2xReQbtFqajA2LYNg4nPrkQ7Jp4rQBJp",
+    }
+    mint = _MEME_MINTS.get(base)
+    if not mint:
+        return None
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.get(
+                f"{DEXSCREENER_API}/token-pairs/v1/solana/{mint}",
+                headers={"Accept": "application/json"},
+            )
+            resp.raise_for_status()
+            pairs = resp.json()
+            if not pairs:
+                return None
+            # Prefer the deepest-liquidity pair.
+            best = max(
+                pairs,
+                key=lambda p: float((p.get("liquidity") or {}).get("usd") or 0),
+            )
+            price_usd = best.get("priceUsd")
+            if price_usd:
+                return float(price_usd)
+        except Exception:
+            return None
+    return None
+
 
 async def fetch_market_data() -> Dict[str, Any]:
     """Collect a snapshot of market prices.
@@ -202,13 +239,15 @@ async def fetch_market_data() -> Dict[str, Any]:
     symbols = [f"{s}USDT" for s in base]
     prices: Dict[str, float] = {}
     for sym in symbols:
-        # Preference order: Binance → CoinMarketCap → CoinGecko → Raydium →
-        # Coinbase → CoinLore (fallback chain; Raydium covers memecoins).
+        # Preference order: Binance → CoinMarketCap → CoinGecko → DexScreener
+        # (Solana memecoins) → Raydium → Coinbase → CoinLore.
         price = await _fetch_price_from_binance(sym)
         if price is None:
             price = await _fetch_price_from_cmc(sym)
         if price is None:
             price = await _fetch_price_from_coingecko(sym)
+        if price is None:
+            price = await _fetch_price_from_dexscreener(sym.split("USDT")[0])
         if price is None:
             price = await _fetch_price_from_raydium(sym.split("USDT")[0])
         if price is None:
