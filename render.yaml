@@ -1,5 +1,5 @@
 services:
-  # ── Backend API (web) ───────────────────────────────────────────
+  # Aegis Quant - single all-in-one web service (API + engines + market + trending)
   - type: web
     name: aegis-quant-api
     env: python
@@ -9,12 +9,14 @@ services:
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
+      # Runtime
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: AEGIS_ROLE
-        value: web
+        value: all
       - key: ENVIRONMENT
         value: production
+      # Database
       - key: DATABASE_URL
         sync: false
       - key: SUPABASE_URL
@@ -23,6 +25,14 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: REDIS_URL
+        sync: false
+      # Secrets
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        sync: false
+      # Telegram bot (webhook / Mini App)
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_BOT_USERNAME
@@ -30,16 +40,6 @@ services:
       - key: TELEGRAM_WEBHOOK_SECRET
         sync: false
       - key: ADMIN_CHAT_ID
-        sync: false
-      - key: ENCRYPTION_KEY
-        sync: false
-      - key: GEMINI_API_KEY_1
-        sync: false
-      - key: GEMINI_API_KEY_2
-        sync: false
-      - key: GEMINI_API_KEY_3
-        sync: false
-      - key: GROQ_API_KEY
         sync: false
       - key: APP_URL
         value: https://aegis-quant.vercel.app
@@ -50,26 +50,45 @@ services:
           envVarName: RENDER_EXTERNAL_URL
       - key: CORS_ORIGINS
         value: https://aegis-quant.vercel.app
-      - key: GRAFANA_URL
+      # Telegram MTProto (Telethon private-channel polling - worker functions)
+      - key: TELEGRAM_API_ID
         sync: false
-      - key: SESSION_SECRET
-        generateValue: true
-      - key: REDIS_URL
+      - key: TELEGRAM_API_HASH
         sync: false
-      - key: SOLANA_RPC_URL
-        value: https://api.mainnet-beta.solana.com
-      - key: WALLET_CONNECT_PROJECT_ID
+      - key: TELEGRAM_PHONE
         sync: false
+      # AI / LLM
+      - key: GEMINI_API_KEY_1
+        sync: false
+      - key: GEMINI_API_KEY_2
+        sync: false
+      - key: GEMINI_API_KEY_3
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      # Market data / trending
       - key: CMC_API_KEY
         sync: false
       - key: RAYDIUM_RPC_URL
         value: https://api.mainnet-beta.solana.com
       - key: TRENDING_POLL_SECONDS
         value: "300"
-      - key: GROQ_MODEL
-        value: llama-3.3-70b-versatile
-      - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+      # Execution
+      - key: SOLANA_RPC_URL
+        value: https://api.mainnet-beta.solana.com
+      - key: SOLANA_PRIVATE_KEY
+        sync: false
+      - key: WALLET_CONNECT_PROJECT_ID
+        sync: false
+      - key: AUTO_CONFIDENCE_THRESHOLD
+        value: "75"
+      # Other
+      - key: GRAFANA_URL
+        sync: false
       - key: KRONOS_SERVICE_URL
         fromService:
           name: aegis-quant-kronos
@@ -77,63 +96,7 @@ services:
           envVarName: RENDER_EXTERNAL_URL
         sync: false
 
-  # ── Worker (engines + channel polling) ───────────────────────────
-  - type: worker
-    name: aegis-quant-worker
-    env: python
-    region: oregon
-    plan: starter
-    buildCommand: cd backend && pip install -r requirements.txt
-    startCommand: cd backend && python worker.py
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
-      - key: AEGIS_ROLE
-        value: worker
-      - key: ENVIRONMENT
-        value: production
-      - key: DATABASE_URL
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: ENCRYPTION_KEY
-        sync: false
-      - key: SESSION_SECRET
-        generateValue: true
-      - key: TELEGRAM_API_ID
-        sync: false
-      - key: TELEGRAM_API_HASH
-        sync: false
-      - key: TELEGRAM_PHONE
-        sync: false
-      - key: GEMINI_API_KEY_1
-        sync: false
-      - key: GEMINI_API_KEY_2
-        sync: false
-      - key: GEMINI_API_KEY_3
-        sync: false
-      - key: GROQ_API_KEY
-        sync: false
-      - key: REDIS_URL
-        sync: false
-      - key: CMC_API_KEY
-        sync: false
-      - key: RAYDIUM_RPC_URL
-        value: https://api.mainnet-beta.solana.com
-      - key: TRENDING_POLL_SECONDS
-        value: "300"
-      - key: GROQ_MODEL
-        value: llama-3.3-70b-versatile
-      - key: GEMINI_MODEL
-        value: gemini-2.5-flash
-      - key: AUTO_CONFIDENCE_THRESHOLD
-        value: "75"
-
-  # ── Kronos (AI forecasting, deployed separately) ─────────────────
+  # Kronos (AI forecasting, deployed separately)
   - type: web
     name: aegis-quant-kronos
     env: python
@@ -147,9 +110,7 @@ services:
         value: 3.11.0
       - key: ENVIRONMENT
         value: production
-      # Set KRONOS_LOAD_MODEL=1 and add the Kronos lib + torch to
-      # kronos/requirements.txt to enable real model inference (needs GPU).
+      # Set KRONOS_LOAD_MODEL=1 + add kronos lib/torch to enable real inference (needs GPU)
       - key: KRONOS_LOAD_MODEL
         value: "0"
         sync: false
-
