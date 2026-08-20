@@ -115,3 +115,39 @@ export function getAvailableSolanaWallets(): string[] {
   return wallets;
 }
 
+/**
+ * Sign a raw Solana transaction (base64) with the connected wallet provider.
+ * Returns the signed raw transaction (base64) for the backend to broadcast.
+ * The private key never leaves the wallet.
+ */
+export async function signSolanaTransaction(
+  unsignedTxBase64: string,
+  walletAddress: string,
+  walletId?: string,
+): Promise<string> {
+  const provider = getSolanaProvider(walletId) || (window as any).solana;
+  if (!provider) {
+    throw new Error('Solana wallet not detected — install Phantom or Solflare');
+  }
+
+  // Provider adapters expose signTransaction in different shapes.
+  if (typeof provider.signTransaction === 'function') {
+    // Returns base64 signed raw transaction.
+    const signed = await provider.signTransaction(unsignedTxBase64);
+    return typeof signed === 'string' ? signed : String(signed);
+  }
+  if (typeof provider.signAllTransactions === 'function') {
+    const signed = await provider.signAllTransactions([unsignedTxBase64]);
+    return signed?.[0] ?? String(signed);
+  }
+  if (typeof provider.request === 'function') {
+    // Phantom-style JSON-RPC sign.
+    const res = await provider.request({
+      method: 'solana_signRawTransaction',
+      params: { encodedTransaction: unsignedTxBase64, address: walletAddress },
+    });
+    return res?.signedTransaction || res?.encodedTransaction || String(res);
+  }
+  throw new Error(`${walletId || 'Solana'} wallet does not expose transaction signing`);
+}
+

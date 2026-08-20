@@ -190,14 +190,15 @@ class ExecutionRouter:
 
         from app.core.exceptions import ExchangeError
         from app.services.jupiter_client import get_jupiter_client, SOL_MINT, sol_to_usd_price
-        from app.services.wallet_gateway import get_solana_client, load_solana_keypair
+        from app.services.wallet_gateway import get_solana_client, load_solana_keypair_for_profile
 
         if not wallet_address:
             raise ExchangeError("wallet_address required for solana dex execution", "SOLANA")
 
         jup = get_jupiter_client()
         rpc = get_solana_client()
-        kp = load_solana_keypair()  # raises clearly if SOLANA_PRIVATE_KEY is unset
+        # Use the user's own keypair when set (multi-tenant), else the server env key.
+        kp = load_solana_keypair_for_profile(profile)
 
         try:
             # Resolve the token mint.
@@ -262,17 +263,42 @@ class ExecutionRouter:
         the user approves in their wallet app, and the signed boc is broadcast +
         persisted by the caller. No server-side TON key is required for user trades.
         """
-        from app.services.ton_trade import build_transfer_messages
+        from app.services.ton_trade import build_transfer_messages, autonomous_transfer_boc, broadcast_boc
         from app.core.exceptions import ExchangeError
+        import os
 
         if not wallet_address:
             raise ExchangeError(
                 "TON trading requires a connected Ton Connect wallet address", "TON"
             )
 
-        # The user's own wallet is the signer + source of funds. For a plain
-        # transfer the recipient is the user themselves (a real DEX swap would set
-        # the recipient to the AMM/router contract address - extend here).
+        # Autonomous path: if a server TON_MNEMONIC is configured, sign + broadcast
+        # the transfer on the server (like CEX/Solana auto-trading). Otherwise fall
+        # back to per-trade user approval via Ton Connect.
+        if os.getenv("TON_MNEMONIC"):
+            boc = autonomous_transfer_boc(
+                recipient=wallet_address,
+                amount_ton=float(size or 0),
+                comment=f"{side.upper()} {symbol}",
+            )
+            try:
+                tx_hash = await broadcast_boc(boc)
+            except Exception as e:
+                raise ExchangeError(f"TON autonomous broadcast failed: {e}", "TON")
+            return ExecutionResult(
+                executed=True,
+                side=side,
+                symbol=symbol,
+                size=size,
+                price=price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                route="dex_ton",
+                status="filled",
+                tx_hash=tx_hash,
+            )
+
+        # Fallback: per-trade user approval via Ton Connect.
         request = build_transfer_messages(
             recipient=wallet_address,
             amount_ton=float(size or 0),

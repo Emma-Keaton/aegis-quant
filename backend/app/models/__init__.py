@@ -81,6 +81,8 @@ class Profile(Base):
     wallet_address = Column(String(64), nullable=True)
     wallet_network = Column(String(10), nullable=True)
     wallet_public_key = Column(String(128), nullable=True)
+    # Per-user Solana private key (AES-256 encrypted) for multi-tenant server-side swaps.
+    solana_private_key_enc = Column(Text, nullable=True)
     
     # Engine B config
     engine_b_enabled = Column(Boolean, default=True, nullable=False)

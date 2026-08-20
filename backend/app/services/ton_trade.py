@@ -77,3 +77,41 @@ async def broadcast_boc(boc_b64: str) -> str:
         logger.warning("TON sendBoc rejected: %s", data)
         raise RuntimeError(f"TON broadcast rejected: {data.get('error', 'unknown')}")
     return str(result)
+
+
+def autonomous_transfer_boc(recipient: str, amount_ton: float, comment: str = "") -> str:
+    """Sign + return a TON transfer .boc using the server TON_MNEMONIC key.
+
+    Uses `tonsdk` (guarded import) so the server can auto-trade TON when a server
+    wallet is configured (TON_MNEMONIC), matching autonomous CEX/Solana behavior.
+    Raises a clear error if the SDK or key is missing.
+    """
+    import os
+    from app.core.exceptions import ExchangeError
+
+    mnemonic = os.getenv("TON_MNEMONIC")
+    if not mnemonic:
+        raise ExchangeError("TON autonomous trading requires TON_MNEMONIC server key", "TON")
+
+    try:
+        from tonsdk.contract.wallet import Wallets
+        from tonsdk.crypto import mnemonic_to_private_key, generate_mnemonic
+    except ImportError as e:
+        raise ExchangeError("TON SDK not installed — add 'tonsdk' to install autonomous TON", "TON")
+
+    nano = int(round(float(amount_ton) * 1_000_000_000))
+    if nano <= 0:
+        raise ExchangeError("amount_ton must be > 0", "TON")
+
+    try:
+        # Derive the wallet from the mnemonic (default v4 wallet, index 0).
+        words = mnemonic.strip().split()
+        W = Wallets.from_words(words, version="v4")
+        owner = W.default.submit_transfer(
+            destination=recipient,
+            amount=amount_ton,
+            message=comment,
+        )
+        return owner.to_boc()
+    except Exception as e:
+        raise ExchangeError(f"TON autonomous sign failed: {e}", "TON")

@@ -50,6 +50,9 @@ solana
 solders
 base58
 
+# TON (autonomous server-side transfers via TON_MNEMONIC)
+tonsdk
+
 # Monitoring
 prometheus-client
 

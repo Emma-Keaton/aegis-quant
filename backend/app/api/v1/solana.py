@@ -43,6 +43,15 @@ class SolanaSwapRequest(BaseModel):
     slippage_bps: int = Field(default=100, ge=1, le=1000)
 
 
+class SolanaConfirmRequest(BaseModel):
+    signed_transaction: str  # base64 raw tx signed by the user's wallet
+    wallet_address: str
+    symbol: Optional[str] = None
+    side: Optional[str] = None
+    size: Optional[float] = None
+    price: Optional[float] = None
+
+
 @router.get("/price/{token_symbol}")
 async def get_solana_price(token_symbol: str):
     """Get current price of a Solana token in USD."""
@@ -188,6 +197,36 @@ async def execute_solana_swap(request: SolanaSwapRequest):
     except Exception as e:
         logger.error(f"Swap error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/confirm")
+async def confirm_solana_swap(request: SolanaConfirmRequest):
+    """Broadcast a wallet-signed Solana swap transaction.
+
+    ``signed_transaction`` is the base64 raw transaction returned by the wallet
+    after the user signed the `/api/solana/swap` payload. Broadcasts it via the
+    public Solana RPC and returns the tx hash. The frontend then records the
+    trade via /api/execute (live) so it shows on the dashboard.
+    """
+    import base64
+    from app.services.wallet_gateway import get_solana_client
+
+    rpc = get_solana_client()
+    try:
+        raw = base64.b64decode(request.signed_transaction)
+        resp = await rpc.send_raw_transaction(raw)
+        sig = str(resp.value) if hasattr(resp, "value") else str(resp)
+    except Exception as e:
+        logger.error(f"Confirm/broadcast error: {e}")
+        raise HTTPException(status_code=502, detail=f"Broadcast failed: {e}")
+    finally:
+        await rpc.close()
+
+    return {
+        "success": True,
+        "tx_hash": sig,
+        "message": "Swap broadcast",
+    }
 
 
 @router.get("/trending")

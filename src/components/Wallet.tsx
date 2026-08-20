@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { connectEVM, connectEVMWallet } from "../crypto/evmConnector";
-import { connectSolana, connectSolanaWallet } from "../crypto/solanaConnector";
+import { connectSolana, connectSolanaWallet, signSolanaTransaction } from "../crypto/solanaConnector";
 import { WALLET_APPS, EVM_FAST_LINKS, SOLANA_FAST_LINKS } from "../crypto/walletLinks";
 import { Link, Wallet as WalletIcon, Shield, Check, ExternalLink, HelpCircle, Eye, Trash2 } from "lucide-react";
 import { useTonConnectUI } from "@tonconnect/ui-react";
 import WalletConnectUI from "./WalletConnectUI";
+import SetupInfoModal from "./SetupInfoModal";
 import { UserState } from "../types";
 import { apiFetch } from "../api/client";
 
@@ -72,7 +73,95 @@ export default function Wallet({
         }
       })
       .catch(() => {});
-    return () => { cancelled = true; };
+    // ?? Per-user Solana wallet-signed trade + autonomous key ?????
+  const [solTradeAmount, setSolTradeAmount] = useState<string>("");
+  const [solTradeToken, setSolTradeToken] = useState<string>("BONK");
+  const [solTradeBusy, setSolTradeBusy] = useState<boolean>(false);
+  const [solTradeMsg, setSolTradeMsg] = useState<string | null>(null);
+  const [solTradeErr, setSolTradeErr] = useState<string | null>(null);
+  const [solKey, setSolKey] = useState<string>("");
+  const [solShowKey, setSolShowKey] = useState<boolean>(false);
+  const [showSetupInfo, setShowSetupInfo] = useState<boolean>(false);
+  const [solKeyStatus, setSolKeyStatus] = useState<{ user_key_set: boolean; server_key_set: boolean; active_source: string } | null>(null);
+
+  useEffect(() => {
+    apiFetch("/api/wallet/solana/key")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (j) setSolKeyStatus({ user_key_set: !!j.user_key_set, server_key_set: !!j.server_key_set, active_source: j.active_source }); })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveSolKey = async () => {
+    try {
+      const res = await apiFetch("/api/wallet/solana/key", {
+        method: "POST",
+        body: JSON.stringify({ private_key: solKey }),
+      });
+      const j = await res.json();
+      if (res.ok) {
+        setSolKey("");
+        setSolKeyStatus((p) => ({ ...(p || { server_key_set: false, active_source: "" }), user_key_set: true, active_source: "user" }));
+        setSolTradeMsg("Solana private key saved (AES-256 encrypted).");
+      } else {
+        setSolTradeErr(j.detail || "Failed to save key");
+      }
+    } catch (e: any) {
+      setSolTradeErr(String(e?.message || e));
+    }
+  };
+
+  const handleDeleteSolKey = async () => {
+    try {
+      await apiFetch("/api/wallet/solana/key", { method: "DELETE" });
+      setSolKeyStatus((p) => (p ? { ...p, user_key_set: false, active_source: p.server_key_set ? "server" : "none" } : p));
+      setSolTradeMsg("Solana private key removed.");
+    } catch (e: any) {
+      setSolTradeErr(String(e?.message || e));
+    }
+  };
+
+  const handleSolanaTrade = async (token: string, _side: "buy") => {
+    if (!userState.walletConnected || !userState.walletAddress) {
+      setSolTradeErr("Connect a Solana wallet first");
+      return;
+    }
+    const amount = parseFloat(solTradeAmount);
+    if (!amount || amount <= 0) {
+      setSolTradeErr("Enter a USD amount greater than 0");
+      return;
+    }
+    setSolTradeBusy(true);
+    setSolTradeMsg(null);
+    setSolTradeErr(null);
+    try {
+      const swap = await apiFetch("/api/solana/swap", {
+        method: "POST",
+        body: JSON.stringify({ token_symbol: token, amount_usd: amount, wallet_address: userState.walletAddress }),
+      });
+      const swapJson = await swap.json();
+      if (!swap.ok || !swapJson.success) {
+        setSolTradeErr(swapJson.detail || "Failed to build swap");
+        return;
+      }
+      const signedRaw = await signSolanaTransaction(swapJson.swap_transaction, userState.walletAddress);
+      const confirm = await apiFetch("/api/solana/confirm", {
+        method: "POST",
+        body: JSON.stringify({ signed_transaction: signedRaw, wallet_address: userState.walletAddress, symbol: token, side: "buy", size: amount }),
+      });
+      const confirmJson = await confirm.json();
+      if (!confirm.ok) {
+        setSolTradeErr(confirmJson.detail || "Broadcast failed");
+        return;
+      }
+      setSolTradeMsg(`SOLANA ${token} SWAP confirmed ? ${confirmJson.tx_hash}`);
+    } catch (e: any) {
+      setSolTradeErr(e?.message ? String(e.message) : "Solana trade cancelled or failed");
+    } finally {
+      setSolTradeBusy(false);
+    }
+  };
+
+  return () => { cancelled = true; };
   }, [userState.walletConnected, userState.walletAddress, userState.network]);
 
   const toggleSpotMargin = async (val: boolean) => {
@@ -416,8 +505,86 @@ export default function Wallet({
               );
             })}
           </div>
+
+          {/* Wallet-signed Solana trade (no private key needed) */}
+          {userState.walletConnected && (userState.network || "").toLowerCase().includes("sol") && (
+            <div className="pt-3 border-t border-zinc-800 space-y-2">
+              <p className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">TRADE SOLANA (WALLET-SIGNED)</p>
+              <div className="flex gap-2">
+                <input
+                  value={solTradeAmount}
+                  onChange={(e) => setSolTradeAmount(e.target.value)}
+                  placeholder="USD amount"
+                  inputMode="decimal"
+                  className="flex-1 w-1/2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white p-2.5 placeholder-zinc-600 focus:outline-none focus:border-[#c6ff34]"
+                />
+                <select
+                  value={solTradeToken}
+                  onChange={(e) => setSolTradeToken(e.target.value)}
+                  className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white p-2.5 focus:outline-none focus:border-[#c6ff34]"
+                >
+                  <option value="BONK">BONK</option>
+                  <option value="WIF">WIF</option>
+                  <option value="POPCAT">POPCAT</option>
+                </select>
+                <button
+                  disabled={solTradeBusy}
+                  onClick={() => handleSolanaTrade(solTradeToken, "buy")}
+                  className="bg-[#c6ff34]/10 text-[#c6ff34] border border-[#c6ff34]/20 font-black text-[10px] px-3 rounded-xl hover:bg-[#c6ff34]/20 transition-all uppercase cursor-pointer disabled:opacity-40"
+                >
+                  {solTradeBusy ? "..." : "SWAP"}
+                </button>
+              </div>
+              {solTradeMsg && <p className="text-[11px] text-[#c6ff34] bg-[#c6ff34]/10 border border-[#c6ff34]/20 rounded-lg px-3 py-2 break-all">{solTradeMsg}</p>}
+              {solTradeErr && <p className="text-[11px] text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{solTradeErr}</p>}
+              <p className="text-[9px] text-zinc-500">Your wallet signs the transaction — your key never leaves the wallet.</p>
+            </div>
+          )}
+
+          {/* Per-user Solana private key (for autonomous trading only) */}
+          <div className="pt-3 border-t border-zinc-800 space-y-2">
+            <p className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">SOLANA PRIVATE KEY (AUTONOMOUS TRADING)</p>
+            <p className="text-[9px] text-zinc-500 leading-relaxed">
+              For server-side autonomous trades the agent places while you're away. Wallet-connected trades always use your on-device signature instead — no key stored. This key is AES-256 encrypted and used only for auto-execution.
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={solKey}
+                onChange={(e) => setSolKey(e.target.value)}
+                placeholder={solKeyStatus?.user_key_set ? "•••••••• (replace)" : "base58 or hex private key"}
+                type={solShowKey ? "text" : "password"}
+                className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white p-2.5 placeholder-zinc-600 focus:outline-none focus:border-[#c6ff34]"
+              />
+              <button
+                disabled={!solKey || networkOffline}
+                onClick={() => handleSaveSolKey()}
+                className="bg-[#c6ff34] text-[#101416] font-black text-[10px] px-3 rounded-xl hover:brightness-110 transition-all uppercase cursor-pointer disabled:opacity-40"
+              >
+                SAVE
+              </button>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded border ${solKeyStatus?.user_key_set ? "bg-[#c6ff34]/10 text-[#c6ff34] border-[#c6ff34]/20" : "bg-zinc-900 text-zinc-500 border-zinc-800"}`}>
+                {solKeyStatus?.user_key_set ? "USER KEY SET" : "NO USER KEY"}
+              </span>
+              <button onClick={() => setSolShowKey(v => !v)} className="text-[9px] text-zinc-400 hover:text-[#c6ff34] underline cursor-pointer">
+                {solShowKey ? "Hide" : "Reveal"}
+              </button>
+              {solKeyStatus?.user_key_set && (
+                <button onClick={() => handleDeleteSolKey()} className="text-[9px] text-red-400 hover:text-red-300 underline cursor-pointer">
+                  REMOVE
+                </button>
+              )}
+              <button onClick={() => setShowSetupInfo(true)} className="text-[9px] text-[#c6ff34] hover:text-white underline cursor-pointer">
+                HOW TO GET YOUR KEY
+              </button>
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* "How to get your keys" setup info modal */}
+      {showSetupInfo && <SetupInfoModal onClose={() => setShowSetupInfo(false)} />}
 
       {/* Watch only address fallback */}
       <div className="space-y-1">

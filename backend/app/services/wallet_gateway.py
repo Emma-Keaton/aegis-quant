@@ -3,6 +3,9 @@ import json
 from typing import Dict
 
 import ccxt
+
+from app.core.encryption import encryption_manager
+
 try:
     from solders.keypair import Keypair
     from solana.rpc.async_api import AsyncClient as SolanaClient
@@ -56,13 +59,42 @@ def load_solana_keypair() -> Keypair:
     secret = os.getenv("SOLANA_PRIVATE_KEY")
     if not secret:
         raise RuntimeError("SOLANA_PRIVATE_KEY not set in environment")
+    return _keypair_from_secret(secret)
+
+
+def _keypair_from_secret(secret: str) -> Keypair:
+    """Build a solders Keypair from a base58 64-byte secret or hex 32-byte secret."""
+    if not _SOLANA_AVAILABLE:
+        raise RuntimeError("Solana support unavailable: install 'solders' + 'solana' to enable it")
+    secret = secret.strip()
     # Preferred: base58-encoded 64-byte secret key (as exported by most wallets).
     try:
-        return Keypair.from_base58_string(secret.strip())
+        return Keypair.from_base58_string(secret)
     except Exception:
         pass
     # Fallback: hex-encoded 32-byte secret key.
-    hexed = secret.strip()
+    hexed = secret
     if hexed.startswith(("0x", "0X")):
         hexed = hexed[2:]
     return Keypair.from_bytes(bytes.fromhex(hexed))
+
+
+def load_solana_keypair_for_profile(profile) -> Keypair:
+    """Load the *per-user* Solana keypair if the profile has one stored.
+
+    Falls back to the shared ``SOLANA_PRIVATE_KEY`` env key when the user has not
+    set their own. This is what makes Solana multi-tenant — each user can bring
+    their own funded wallet/keypair while the server default still works.
+    """
+    secret = None
+    if profile is not None and getattr(profile, "solana_private_key_enc", None):
+        try:
+            from app.core.encryption import decrypt_credentials
+            secret = encryption_manager.decrypt(profile.solana_private_key_enc)
+        except Exception:
+            secret = None
+    if not secret:
+        secret = os.getenv("SOLANA_PRIVATE_KEY")
+    if not secret:
+        raise RuntimeError("No Solana private key set — add one in Wallet or set SOLANA_PRIVATE_KEY env")
+    return _keypair_from_secret(secret)

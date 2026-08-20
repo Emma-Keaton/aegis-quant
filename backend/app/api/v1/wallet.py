@@ -9,7 +9,7 @@ import uuid
 from app.database import get_db
 from app.core.telegram_auth import get_current_user
 from app.models import Profile, UserCredential
-from app.core.encryption import encrypt_credentials, decrypt_credentials
+from app.core.encryption import encrypt_credentials, decrypt_credentials, encryption_manager
 
 router = APIRouter(prefix="/api/wallet", tags=["wallet"])
 
@@ -411,3 +411,129 @@ async def _get_wallet_address(db: AsyncSession, telegram_id) -> Optional[str]:
     if not profile:
         return None
     return profile.wallet_address if getattr(profile, "wallet_connected", False) else None
+
+
+# ── Per-user Solana key (multi-tenancy server-side swaps) ──────────────────
+
+class SolanaKeyRequest(BaseModel):
+    private_key: str
+
+
+@router.get("/solana/key")
+async def get_solana_key_status(
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return whether the user has a per-user Solana key set (never the key itself)."""
+    result = await db.execute(select(Profile).where(Profile.telegram_id == user["id"]))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    has_user_key = bool(getattr(profile, "solana_private_key_enc", None))
+    has_server_key = bool(_env("SOLANA_PRIVATE_KEY"))
+    return {
+        "status": "success",
+        "user_key_set": has_user_key,
+        "server_key_set": has_server_key,
+        "active_source": "user" if has_user_key else ("server" if has_server_key else "none"),
+    }
+
+
+@router.post("/solana/key")
+async def set_solana_key(
+    request: SolanaKeyRequest,
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Validate + store the user's Solana private key (AES-256 encrypted, per-tenant)."""
+    secret = (request.private_key or "").strip()
+    if not secret:
+        raise HTTPException(status_code=400, detail="private_key is required")
+    # Validate it parses into a keypair before storing.
+    try:
+        from app.services.wallet_gateway import _keypair_from_secret
+        _keypair_from_secret(secret)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid Solana private key: {e}")
+
+    result = await db.execute(select(Profile).where(Profile.telegram_id == user["id"]))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    profile.solana_private_key_enc = encryption_manager.encrypt(secret)
+    await db.commit()
+    return {"ok": True, "message": "Solana private key stored encrypted for this profile"}
+
+
+@router.delete("/solana/key")
+async def delete_solana_key(
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Profile).where(Profile.telegram_id == user["id"]))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    profile.solana_private_key_enc = None
+    await db.commit()
+    return {"ok": True, "message": "Solana private key removed"}
+
+
+def _env(key: str) -> str:
+    import os
+    return os.getenv(key, "")
+
+
+# ── "How to get your keys" setup info (per connection method) ──────────────
+
+@router.get("/setup-info")
+async def wallet_setup_info():
+    """Return signing-up / get-key instructions for each wallet + exchange connection."""
+    return {
+        "status": "success",
+        "methods": [
+            {
+                "method": "TON",
+                "title": "Connect TON Wallet",
+                "steps": [
+                    "1. Install the Tonkeeper (or Tonhub) app on your phone.",
+                    "2. Open the app and create/import a wallet — note the address.",
+                    "3. Fund it with TON (buy on an exchange and withdraw to the wallet).",
+                    "4. Tap 'CONNECT TON KEEPER / WALLET' in the app and approve the connection.",
+                    "5. Your wallet address is auto-saved. Use the 'TRADE TON' panel to send after on-device approval.",
+                ],
+            },
+            {
+                "method": "Solana (keypair)",
+                "title": "Solana — Connect with your private key",
+                "steps": [
+                    "1. Create a Solana wallet (Phantom/Solflare/Torus) and fund it with SOL.",
+                    "2. Export the private key (base58 64-byte or hex 32-byte secret).",
+                    "3. Paste it into the 'SOLANA PRIVATE KEY' field below — it is AES-256 encrypted per user.",
+                    "4. Your Solana wallet address is used for swaps; the key signs Jupiter transactions server-side.",
+                    "5. To create a keypair programmatically: `Keypair.create()` then export its `raw_secret` (Phantom exports base58).",
+                ],
+            },
+            {
+                "method": "EVM",
+                "title": "Ethereum / BSC / Polygon (WalletConnect)",
+                "steps": [
+                    "1. Install MetaMask, Trust, or Safepal.",
+                    "2. Tap CONNECT VIA WALLETCONNECT → approve in the wallet.",
+                    "3. Fund the wallet on the matching network (ETH/BNB/POLYGON) for gas + trade value.",
+                ],
+            },
+            {
+                "method": "CEX",
+                "title": "Bybit / OKX / Binance — API keys",
+                "steps": [
+                    "1. Create an account on the exchange and enable 2FA.",
+                    "2. Open the exchange's API-keys/manage page (Bybit: API Management; OKX: API; Binance: API Management).",
+                    "3. Create an API key with **read-only** + trade (spot) permissions — never enable withdrawals.",
+                    "4. Enter the API Key + Secret + Passphrase (OKX) in the Vault below. Keys are AES-256 encrypted.",
+                    "5. Deposits are isolated and withdrawals stay blocked by design.",
+                ],
+            },
+        ],
+    }
