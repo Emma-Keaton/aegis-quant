@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { UserState, RiskSettings } from "./types";
 import Dashboard from "./components/Dashboard";
 import Wallet from "./components/Wallet";
@@ -62,6 +62,9 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
 
   // Network Offline connection loss simulation state
   const [networkOffline, setNetworkOffline] = useState<boolean>(false);
+  // Persists across connectivity checks so the offline flag needs 2 consecutive
+  // failures to trigger (avoids flashing the overlay on a single slow request).
+  const consecutiveFailsRef = useRef(0);
 
   // ── Auth / Session Init ────────────────────────────────────────
 
@@ -163,13 +166,27 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
         setNetworkOffline(true);
         return;
       }
+      // Require 2 consecutive failures before declaring offline (and reset on
+      // success) so a single slow request - cold start, free-tier spin-up,
+      // engine boot in a merged process - never flashes the overlay while the
+      // backend is actually up.
       try {
+        // 10s timeout - generous for cold free-tier starts.
         const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), 2500);
+        const id = setTimeout(() => controller.abort(), 10000);
         const res = await fetch(`${getApiBase()}/health`, { signal: controller.signal, cache: "no-store" });
         clearTimeout(id);
-        setNetworkOffline(!res.ok);
+        if (res.ok) {
+          consecutiveFailsRef.current = 0;
+          setNetworkOffline(false);
+        } else {
+          consecutiveFailsRef.current += 1;
+        }
       } catch {
+        consecutiveFailsRef.current += 1;
+      }
+      // Only go offline after 2 consecutive failures.
+      if (consecutiveFailsRef.current >= 2) {
         setNetworkOffline(true);
       }
     };

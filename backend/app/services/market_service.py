@@ -31,14 +31,14 @@ class MarketDataService:
 
     def __init__(self):
         # Exchange clients (lazy-loaded, cached)
-        self._exchanges: Dict[str, ccxt.async_support.Exchange] = {}
+        self._exchanges: Dict[str, ccxt.Exchange] = {}
         # Cache for API responses
         self._cache: Dict[str, Tuple[datetime, any]] = {}
         self._cache_ttl = 30  # seconds
         # Httpx session for CoinGecko/Coinlore
         self._http_client = httpx.AsyncClient()
 
-    async def _get_exchange(self, exchange_id: str, api_key: str = None, secret: str = None) -> ccxt.async_support.Exchange:
+    async def _get_exchange(self, exchange_id: str, api_key: str = None, secret: str = None) -> ccxt.Exchange:
         """Get or create an exchange client."""
         cache_key = f"exchange:{exchange_id}"
         if cache_key in self._exchanges:
