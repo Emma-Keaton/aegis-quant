@@ -439,6 +439,46 @@ export default function Wallet({
                 </p>
               </div>
             )}
+
+            {/* Per-user TON mnemonic (for autonomous trading) */}
+            <div className="pt-3 border-t border-zinc-800 space-y-2">
+              <p className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">TON MNEMONIC (AUTONOMOUS TRADING)</p>
+              <p className="text-[9px] text-zinc-500 leading-relaxed">
+                Paste your TON wallet's 12+ word seed to let the agent auto-trade TON server-side while you're away. AES-256 encrypted per user. Wallet-connected trades still use your on-device approval.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={tonMnemonic}
+                  onChange={(e) => setTonMnemonic(e.target.value)}
+                  placeholder={tonMnemonicStatus?.user_mnemonic_set ? "•••••• (12+ words)" : "12+ word mnemonic seed"}
+                  type={tonShowMnemonic ? "text" : "password"}
+                  className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white p-2.5 placeholder-zinc-600 focus:outline-none focus:border-[#c6ff34]"
+                />
+                <button
+                  disabled={!tonMnemonic || networkOffline}
+                  onClick={() => handleSaveTonMnemonic()}
+                  className="bg-[#c6ff34] text-[#101416] font-black text-[10px] px-3 rounded-xl hover:brightness-110 transition-all uppercase cursor-pointer disabled:opacity-40"
+                >
+                  SAVE
+                </button>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded border ${tonMnemonicStatus?.user_mnemonic_set ? "bg-[#c6ff34]/10 text-[#c6ff34] border-[#c6ff34]/20" : "bg-zinc-900 text-zinc-500 border-zinc-800"}`}>
+                  {tonMnemonicStatus?.user_mnemonic_set ? "USER MNEMONIC SET" : "NO USER MNEMONIC"}
+                </span>
+                <button onClick={() => setTonShowMnemonic(v => !v)} className="text-[9px] text-zinc-400 hover:text-[#c6ff34] underline cursor-pointer">
+                  {tonShowMnemonic ? "Hide" : "Reveal"}
+                </button>
+                {tonMnemonicStatus?.user_mnemonic_set && (
+                  <button onClick={() => handleDeleteTonMnemonic()} className="text-[9px] text-red-400 hover:text-red-300 underline cursor-pointer">
+                    REMOVE
+                  </button>
+                )}
+                <button onClick={() => setShowSetupInfo(true)} className="text-[9px] text-[#c6ff34] hover:text-white underline cursor-pointer">
+                  HOW TO GET YOUR KEY
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -492,7 +532,47 @@ export default function Wallet({
           <div className="flex flex-wrap gap-1.5">
             {SOLANA_FAST_LINKS.map((wid) => {
               const app = WALLET_APPS[wid];
-              return (
+              const [tonMnemonic, setTonMnemonic] = useState<string>("");
+  const [tonShowMnemonic, setTonShowMnemonic] = useState<boolean>(false);
+  const [tonMnemonicStatus, setTonMnemonicStatus] = useState<{ user_mnemonic_set: boolean; server_mnemonic_set: boolean; active_source: string } | null>(null);
+
+  useEffect(() => {
+    apiFetch("/api/wallet/ton/mnemonic")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (j) setTonMnemonicStatus({ user_mnemonic_set: !!j.user_mnemonic_set, server_mnemonic_set: !!j.server_mnemonic_set, active_source: j.active_source }); })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveTonMnemonic = async () => {
+    try {
+      const res = await apiFetch("/api/wallet/ton/mnemonic", {
+        method: "POST",
+        body: JSON.stringify({ mnemonic: tonMnemonic }),
+      });
+      const j = await res.json();
+      if (res.ok) {
+        setTonMnemonic("");
+        setTonMnemonicStatus((p) => ({ ...(p || { server_mnemonic_set: false, active_source: "" }), user_mnemonic_set: true, active_source: "user" }));
+        setTonTradeMsg("TON mnemonic saved (AES-256 encrypted).");
+      } else {
+        setTonTradeErr(j.detail || "Failed to save mnemonic");
+      }
+    } catch (e: any) {
+      setTonTradeErr(String(e?.message || e));
+    }
+  };
+
+  const handleDeleteTonMnemonic = async () => {
+    try {
+      await apiFetch("/api/wallet/ton/mnemonic", { method: "DELETE" });
+      setTonMnemonicStatus((p) => (p ? { ...p, user_mnemonic_set: false, active_source: p.server_mnemonic_set ? "server" : "none" } : p));
+      setTonTradeMsg("TON mnemonic removed.");
+    } catch (e: any) {
+      setTonTradeErr(String(e?.message || e));
+    }
+  };
+
+  return (
                 <button
                   key={wid}
                   type="button"

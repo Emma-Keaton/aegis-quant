@@ -480,6 +480,65 @@ async def delete_solana_key(
     return {"ok": True, "message": "Solana private key removed"}
 
 
+# ── Per-user TON mnemonic (multi-tenancy autonomous TON) ───────────────────
+
+class TonMnemonicRequest(BaseModel):
+    mnemonic: str
+
+
+@router.get("/ton/mnemonic")
+async def get_ton_mnemonic_status(
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return whether the user has a TON mnemonic set (never returns the seed)."""
+    result = await db.execute(select(Profile).where(Profile.telegram_id == user["id"]))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    has_user = bool(getattr(profile, "ton_mnemonic_enc", None))
+    has_server = bool(_env("TON_MNEMONIC"))
+    return {
+        "status": "success",
+        "user_mnemonic_set": has_user,
+        "server_mnemonic_set": has_server,
+        "active_source": "user" if has_user else ("server" if has_server else "none"),
+    }
+
+
+@router.post("/ton/mnemonic")
+async def set_ton_mnemonic(
+    request: TonMnemonicRequest,
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Validate + store the user's TON wallet mnemonic (AES-256 encrypted, per-tenant)."""
+    seed = (request.mnemonic or "").strip()
+    if not seed or len(seed.split()) < 12:
+        raise HTTPException(status_code=400, detail="A valid TON mnemonic is 12+ words")
+    result = await db.execute(select(Profile).where(Profile.telegram_id == user["id"]))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    profile.ton_mnemonic_enc = encryption_manager.encrypt(seed)
+    await db.commit()
+    return {"ok": True, "message": "TON mnemonic stored encrypted for this profile"}
+
+
+@router.delete("/ton/mnemonic")
+async def delete_ton_mnemonic(
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Profile).where(Profile.telegram_id == user["id"]))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    profile.ton_mnemonic_enc = None
+    await db.commit()
+    return {"ok": True, "message": "TON mnemonic removed"}
+
+
 def _env(key: str) -> str:
     import os
     return os.getenv(key, "")
@@ -502,6 +561,7 @@ async def wallet_setup_info():
                     "3. Fund it with TON (buy on an exchange and withdraw to the wallet).",
                     "4. Tap 'CONNECT TON KEEPER / WALLET' in the app and approve the connection.",
                     "5. Your wallet address is auto-saved. Use the 'TRADE TON' panel to send after on-device approval.",
+                    "6. For AUTONOMOUS trading (agent trades while you're away): export your wallet's 12+ word mnemonic/seed phrase in the wallet app and paste it into the 'TON MNEMONIC' field below — it is AES-256 encrypted per user.",
                 ],
             },
             {

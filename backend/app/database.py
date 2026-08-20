@@ -75,6 +75,9 @@ async def init_db() -> None:
         await conn.execute(__import__('sqlalchemy').text(
             "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS solana_private_key_enc TEXT"
         ))
+        await conn.execute(__import__('sqlalchemy').text(
+            "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS ton_mnemonic_enc TEXT"
+        ))
         print("[DB] Tables created/verified successfully")
 
 

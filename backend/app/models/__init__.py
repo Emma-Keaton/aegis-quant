@@ -83,6 +83,8 @@ class Profile(Base):
     wallet_public_key = Column(String(128), nullable=True)
     # Per-user Solana private key (AES-256 encrypted) for multi-tenant server-side swaps.
     solana_private_key_enc = Column(Text, nullable=True)
+    # Per-user TON wallet mnemonic (AES-256 encrypted) for multi-tenant autonomous TON.
+    ton_mnemonic_enc = Column(Text, nullable=True)
     
     # Engine B config
     engine_b_enabled = Column(Boolean, default=True, nullable=False)

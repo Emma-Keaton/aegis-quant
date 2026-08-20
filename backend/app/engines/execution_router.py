@@ -272,14 +272,17 @@ class ExecutionRouter:
                 "TON trading requires a connected Ton Connect wallet address", "TON"
             )
 
-        # Autonomous path: if a server TON_MNEMONIC is configured, sign + broadcast
-        # the transfer on the server (like CEX/Solana auto-trading). Otherwise fall
-        # back to per-trade user approval via Ton Connect.
-        if os.getenv("TON_MNEMONIC"):
+        # Autonomous path: sign + broadcast with the *user's own* TON mnemonic when
+        # set (multi-tenancy), else the server TON_MNEMONIC. If neither is available,
+        # fall back to per-trade user approval via Ton Connect.
+        from app.services.ton_trade import load_profile_mnemonic
+        user_mnemonic = load_profile_mnemonic(profile)
+        if user_mnemonic or os.getenv("TON_MNEMONIC"):
             boc = autonomous_transfer_boc(
                 recipient=wallet_address,
                 amount_ton=float(size or 0),
                 comment=f"{side.upper()} {symbol}",
+                mnemonic=user_mnemonic,  # None -> falls back to env inside
             )
             try:
                 tx_hash = await broadcast_boc(boc)
