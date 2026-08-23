@@ -10,10 +10,10 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import asyncio
 
@@ -204,34 +204,32 @@ def create_app() -> FastAPI:
     
     @app.exception_handler(AegisQuantError)
     async def aegis_handler(request, exc: AegisQuantError):
-        return {"error": exc.message, "code": exc.code, "status_code": exc.status_code}
-    
+        return JSONResponse(status_code=exc.status_code, content={"error": exc.message, "code": exc.code})
+
     @app.exception_handler(TelegramAuthError)
     async def telegram_auth_handler(request, exc: TelegramAuthError):
-        return {"error": str(exc), "code": "TELEGRAM_AUTH_ERROR"}, 403
-    
+        return JSONResponse(status_code=403, content={"error": str(exc), "code": "TELEGRAM_AUTH_ERROR"})
+
     @app.exception_handler(ExchangeError)
     async def exchange_handler(request, exc: ExchangeError):
-        return {"error": exc.message, "code": exc.code}, 502
-    
+        return JSONResponse(status_code=502, content={"error": exc.message, "code": exc.code})
+
     @app.exception_handler(InsufficientFundsError)
     async def funds_handler(request, exc: InsufficientFundsError):
-        return {"error": exc.message, "code": exc.code}, 400
-    
+        return JSONResponse(status_code=400, content={"error": exc.message, "code": exc.code})
+
     @app.exception_handler(RiskLimitExceededError)
     async def risk_handler(request, exc: RiskLimitExceededError):
-        return {"error": exc.message, "code": exc.code}, 400
-    
+        return JSONResponse(status_code=400, content={"error": exc.message, "code": exc.code})
+
     @app.exception_handler(KronosError)
     async def kronos_handler(request, exc: KronosError):
-        return {"error": exc.message, "code": exc.code}, 503
-    
+        return JSONResponse(status_code=503, content={"error": exc.message, "code": exc.code})
+
     @app.exception_handler(GeminiError)
     async def gemini_handler(request, exc: GeminiError):
-        return {"error": exc.message, "code": exc.code}, 503
-    
-    # ── Health ────────────────────────────────────────────────────
-    
+        return JSONResponse(status_code=503, content={"error": exc.message, "code": exc.code})
+
     @app.get("/health")
     async def health():
         return {"status": "ok", "service": "aegis-quant", "version": settings.APP_VERSION}
