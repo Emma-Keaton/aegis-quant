@@ -45,6 +45,7 @@ from app.api.v1.config import router as config_router
 from app.api.v1.portfolio import router as portfolio_router
 from app.api.v1.onboarding import router as onboarding_router
 from app.api.v1.trending import router as trending_router
+from app.api.v1.coins import router as coins_router
 
 # ── Logging ───────────────────────────────────────────────────────
 
@@ -263,6 +264,7 @@ def create_app() -> FastAPI:
     app.include_router(sources_router)  # Source management
     app.include_router(config_router)   # Public app config
     app.include_router(portfolio_router)  # Portfolio history & stats
+    app.include_router(coins_router)  # Coin search for the watchlist
     app.include_router(onboarding_router)  # Per-page onboarding tours
     app.include_router(trending_router)  # Trending tokens bucket
     # Metrics API

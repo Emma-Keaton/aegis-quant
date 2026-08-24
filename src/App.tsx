@@ -48,9 +48,12 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
     stopLoss: 3.0,
     takeProfit: 6.5,
     trailingStop: 1.0,
-    whitelist: ["SOL", "TON", "ETH", "BTC", "PEPE", "BONK", "WIF"],
+    whitelist: [], // start from scratch — users search & add watched tokens
     baseTradeUsd: 10.0
   });
+
+  // Forced "watch tokens" tour — fires when the user activates the AI with no tokens watched.
+  const [forceTokensTour, setForceTokensTour] = useState(false);
 
   // Backtest result overlay state
   const [backtestResult, setBacktestResult] = useState<{
@@ -249,6 +252,11 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
   // ── Handlers ──────────────────────────────────────────────────
 
   const handleToggleAgent = async (active: boolean) => {
+    // If activating the AI trader with no watched tokens, teach the user to add
+    // tokens first (both modes) — PAPER and LIVE both require a watchlist.
+    if (active && (riskSettings.whitelist.length === 0)) {
+      setForceTokensTour(true);
+    }
     setUserState(prev => ({ ...prev, agentActive: active }));
     try {
       await apiJson("/api/toggle-agent", { method: "POST", body: JSON.stringify({ active }) });
@@ -310,6 +318,7 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
   };
 
   const handlePageCompleted = (page: string) => {
+    if (page === "tokens") setForceTokensTour(false);
     setUserState((prev) => ({
       ...prev,
       onboardingPages: prev.onboardingPages.includes(page)
@@ -485,6 +494,8 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
             page={currentTab}
             completedPages={userState.onboardingPages || []}
             onPageCompleted={handlePageCompleted}
+            forceTour={forceTokensTour}
+            forceTourKey={forceTokensTour ? "tokens" : undefined}
           />
         )}
 

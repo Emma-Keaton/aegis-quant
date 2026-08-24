@@ -90,13 +90,15 @@ export default function Strategy({
     }
   };
 
-  // Dynamic Whitelist Tokens List
-  const [tokensList, setTokensList] = useState<string[]>(() => {
-    const defaults = ["SOL", "TON", "ETH", "BTC", "PEPE", "DOGE", "BONK", "WIF"];
-    const combined = Array.from(new Set([...defaults, ...(riskSettings.whitelist || [])]));
-    return combined;
-  });
+  // Dynamic Whitelist Tokens List — starts empty. Users search & select coins,
+  // which reach the backend user_whitelist table that drives the market feeds.
+  const [tokensList, setTokensList] = useState<string[]>(riskSettings.whitelist || []);
   const [newTokenInput, setNewTokenInput] = useState<string>("");
+  const [coinSearch, setCoinSearch] = useState<string>("");
+  const [coinResults, setCoinResults] = useState<{ symbol: string; name: string }[]>([]);
+  const [coinSearching, setCoinSearching] = useState<boolean>(false);
+  const [whitelistBusy, setWhitelistBusy] = useState<string | null>(null);
+  const [coinVerifyMsg, setCoinVerifyMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Historical Backtesting states
   const [backtestRange, setBacktestRange] = useState<string>("3M");
@@ -271,12 +273,8 @@ export default function Strategy({
     setTakeProfit(riskSettings.takeProfit.toString());
     setTrailing(riskSettings.trailingStop.toString());
     
-    // Sync tokensList with any newly loaded whitelist
-    const defaults = ["SOL", "TON", "ETH", "BTC", "PEPE", "DOGE", "BONK", "WIF"];
-    setTokensList(prev => {
-      const combined = Array.from(new Set([...defaults, ...prev, ...(riskSettings.whitelist || [])]));
-      return combined;
-    });
+    // Sync tokensList with any newly loaded whitelist (no hardcoded seeds — start fresh)
+    setTokensList(prev => Array.from(new Set([...prev, ...(riskSettings.whitelist || [])])));
   }, [riskSettings]);
 
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -309,14 +307,145 @@ export default function Strategy({
     }
   };
 
-  const handleTokenToggle = (token: string) => {
-    let currentWhitelist = [...riskSettings.whitelist];
-    if (currentWhitelist.includes(token)) {
-      currentWhitelist = currentWhitelist.filter(t => t !== token);
-    } else {
-      currentWhitelist.push(token);
+  // Debounced coin search — finds real coins via /api/coins/search and lets the
+  // user select them onto the watchlist (which drives the market feeds + AI).
+  useEffect(() => {
+    const q = coinSearch.trim();
+    if (!q) {
+      setCoinResults([]);
+      return;
     }
-    onUpdateSettings({ whitelist: currentWhitelist });
+    const t = setTimeout(async () => {
+      setCoinSearching(true);
+      try {
+        const res = await apiFetch(`/api/coins/search?q=${encodeURIComponent(q)}&limit=8`);
+        if (res.ok) {
+          const json = await res.json();
+          setCoinResults(json.coins || []);
+        } else {
+          setCoinResults([]);
+        }
+      } catch {
+        setCoinResults([]);
+      } finally {
+        setCoinSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coinSearch]);
+
+  // Persist a token to the backend user_whitelist (+ local risk whitelist).
+  const persistWhitelist = async (symbol: string, add: boolean, sourceLabel: string) => {
+    if (networkOffline) return;
+    setWhitelistBusy(symbol);
+    try {
+      if (add) {
+        await apiFetch("/api/whitelist", {
+          method: "POST",
+          body: JSON.stringify({ symbol, exchange: "bybit" }),
+        });
+      } else {
+        await apiFetch(`/api/whitelist/${encodeURIComponent(symbol)}?exchange=bybit`, { method: "DELETE" });
+      }
+      // Update local state after backend confirms.
+      let next = [...riskSettings.whitelist];
+      if (add) {
+        if (!next.includes(sourceLabel || symbol)) next.push(sourceLabel || symbol);
+      } else {
+        next = next.filter((t) => t !== symbol);
+      }
+      onUpdateSettings({ whitelist: next });
+      setWhitelistBusy(null);
+    } catch {
+      // Non-fatal — keep the UI responsive, surface via console.
+      setWhitelistBusy(null);
+    }
+  };
+
+  const handleTokenToggle = (token: string) =>
+    handleWhitelistToggle(token);
+
+  const handleWhitelistToggle = async (token: string) => {
+    const currentlyWatched = riskSettings.whitelist.includes(token);
+    let next = [...riskSettings.whitelist];
+    if (currentlyWatched) {
+      next = next.filter((t) => t !== token);
+      onUpdateSettings({ whitelist: next });
+      await persistWhitelist(token, false, token);
+    } else {
+      if (!next.includes(token)) next.push(token);
+      onUpdateSettings({ whitelist: next });
+      await persistWhitelist(token, true, token);
+    }
+  };
+
+  // Hard-reset: deselect every watched token (start fresh).
+  const handleClearAllWhitelist = async () => {
+    if (networkOffline) return;
+    setWhitelistBusy("__all__");
+    try {
+      await apiFetch("/api/whitelist/all", { method: "DELETE" });
+    } catch {
+      /* non-fatal */
+    }
+    setTokensList([]);
+    setCoinResults([]);
+    onUpdateSettings({ whitelist: [] });
+    setWhitelistBusy(null);
+  };
+
+  const setTokensState = (next: string[]) => setTokensList(Array.from(new Set(next)));
+
+  // Verify a token is real on its platform (via /api/coins/search), then add it.
+  const verifyAndAddToken = async (input: string) => {
+    const trimmed = input.trim().toUpperCase();
+    if (!trimmed) return;
+    setCoinVerifyMsg(null);
+    setWhitelistBusy(trimmed);
+    try {
+      if (riskSettings.whitelist.includes(trimmed)) {
+        setCoinVerifyMsg({ ok: true, text: `${trimmed} is already on your watchlist.` });
+        return;
+      }
+      const res = await apiFetch(`/api/coins/search?q=${encodeURIComponent(trimmed)}&limit=5`);
+      let match: { symbol: string; name: string } | null = null;
+      if (res.ok) {
+        const json = await res.json();
+        const coins: { symbol: string; name: string }[] = json.coins || [];
+        // Exact symbol match takes priority; else a name that looks exact.
+        match =
+          coins.find((c) => c.symbol.toUpperCase() === trimmed) ||
+          coins.find((c) => c.name.toUpperCase() === trimmed) ||
+          coins.find((c) => c.symbol.toUpperCase().startsWith(trimmed)) ||
+          null;
+        if (json.source === "coingecko" && !match && coins.length > 0) {
+          // Mild fuzz — a partial/name match is still "verified" if it resolves.
+          match = coins[0];
+        }
+      }
+      if (!match) {
+        setCoinVerifyMsg({
+          ok: false,
+          text: `"${trimmed}" wasn't found on the token index — verify the ticker and try again.`,
+        });
+        return;
+      }
+      const symbol = match.symbol.toUpperCase();
+      if (!riskSettings.whitelist.includes(symbol)) {
+        await persistWhitelist(symbol, true, symbol);
+        setTokensState([...tokensList, symbol]);
+        setCoinVerifyMsg({ ok: true, text: `${symbol} verified & added to watchlist.` });
+      } else {
+        setCoinVerifyMsg({ ok: true, text: `${symbol} is already on your watchlist.` });
+      }
+    } catch {
+      setCoinVerifyMsg({ ok: false, text: "Couldn't verify this token right now — please retry." });
+    } finally {
+      setWhitelistBusy(null);
+      setCoinSearch("");
+      setNewTokenInput("");
+    }
   };
 
   const incrementTrades = () => {
@@ -723,13 +852,11 @@ export default function Strategy({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setTokensList(prev => prev.filter(t => t !== token));
-                      onUpdateSettings({
-                        whitelist: riskSettings.whitelist.filter(t => t !== token)
-                      });
+                      handleWhitelistToggle(token);
                     }}
-                    className="p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-900 transition-colors cursor-pointer"
-                    title={`Delete ${token}`}
+                    className="p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-900 transition-colors cursor-pointer disabled:opacity-40"
+                    title={`Remove ${token} from watchlist`}
+                    disabled={whitelistBusy === token}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -738,39 +865,88 @@ export default function Strategy({
             })}
           </div>
 
-          {/* Add custom token form */}
-          <div className="flex gap-2 pt-2 border-t border-zinc-900">
-            <input
-              type="text"
-              placeholder="e.g. BONK, SHIB, DOGE"
-              value={newTokenInput}
-              onChange={(e) => setNewTokenInput(e.target.value.toUpperCase())}
-              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white font-bold placeholder-zinc-700 focus:outline-none focus:border-[#c6ff34]"
-            />
+          {/* Coin search + select */}
+          <div className="pt-2 border-t border-zinc-900 space-y-2">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Search coins to watch (e.g. SOL, BONK, WIF)…"
+                value={coinSearch}
+                onChange={(e) => setCoinSearch(e.target.value)}
+                className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white font-bold placeholder-zinc-700 focus:outline-none focus:border-[#c6ff34]"
+              />
+              <button
+                type="button"
+                onClick={() => verifyAndAddToken(coinSearch || newTokenInput)}
+                className="bg-[#c6ff34] hover:bg-[#b0f020] text-black text-xs font-black px-4 py-2 rounded-xl flex items-center gap-1 transition-all cursor-pointer active:scale-95 shadow-md shadow-[#c6ff34]/10 disabled:opacity-50"
+                disabled={whitelistBusy !== null}
+                title="Verify the token is real, then add it to your watchlist"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {whitelistBusy !== null ? "VERIFYING…" : "ADD"}
+              </button>
+            </div>
+
+            {/* Verification result banner */}
+            {coinVerifyMsg && (
+              <p
+                className={`text-[9px] font-mono leading-relaxed ${coinVerifyMsg.ok ? "text-[#c6ff34]" : "text-red-400"}`}
+              >
+                {coinVerifyMsg.ok ? "✔ " : "⚠ "}
+                {coinVerifyMsg.text}
+              </p>
+            )}
+
+            {/* Live search suggestions */}
+            {coinSearching && (
+              <p className="text-[9px] font-mono text-zinc-500 animate-pulse">SEARCHING…</p>
+            )}
+            {coinResults.length > 0 && (
+              <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto">
+                {coinResults.map((c) => {
+                  const watched = riskSettings.whitelist.includes(c.symbol);
+                  return (
+                    <button
+                      key={c.symbol + c.name}
+                      type="button"
+                      onClick={() => {
+                        if (!watched) {
+                          persistWhitelist(c.symbol, true, c.symbol);
+                          setTokensList((prev) =>
+                            prev.includes(c.symbol) ? prev : [...prev, c.symbol]
+                          );
+                        }
+                        setCoinSearch("");
+                        setCoinResults([]);
+                      }}
+                      disabled={watched || whitelistBusy !== null}
+                      className={`flex items-center gap-1.5 text-left px-2 py-1.5 rounded-lg border transition-all ${
+                        watched
+                          ? "border-[#c6ff34]/30 bg-[#171717]/40 text-[#c6ff34]"
+                          : "border-zinc-800/60 bg-zinc-900 hover:bg-zinc-850 text-white"
+                      }`}
+                    >
+                      <Coins className="w-3 h-3 text-zinc-500" />
+                      <span className="text-[10px] font-bold font-mono">{c.symbol}</span>
+                      <span className="text-[9px] text-zinc-500 truncate flex-1">{c.name}</span>
+                      {watched && <span className="text-[9px] font-black text-[#c6ff34]">✔</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {!coinSearching && coinSearch.trim() && coinResults.length === 0 && (
+              <p className="text-[9px] text-zinc-500 font-mono">NO MATCHES — try a ticker like SOL or BONK.</p>
+            )}
+
+            {/* Deselect all (start fresh) */}
             <button
               type="button"
-              onClick={() => {
-                const trimmed = newTokenInput.trim().toUpperCase();
-                if (trimmed) {
-                  if (tokensList.includes(trimmed)) {
-                    if (!riskSettings.whitelist.includes(trimmed)) {
-                      onUpdateSettings({
-                        whitelist: [...riskSettings.whitelist, trimmed]
-                      });
-                    }
-                  } else {
-                    setTokensList(prev => [...prev, trimmed]);
-                    onUpdateSettings({
-                      whitelist: [...riskSettings.whitelist, trimmed]
-                    });
-                  }
-                  setNewTokenInput("");
-                }
-              }}
-              className="bg-[#c6ff34] hover:bg-[#b0f020] text-black text-xs font-black px-4 py-2 rounded-xl flex items-center gap-1 transition-all cursor-pointer active:scale-95 shadow-md shadow-[#c6ff34]/10"
+              onClick={handleClearAllWhitelist}
+              disabled={whitelistBusy === "__all__"}
+              className="w-full border border-red-500/30 text-red-400/90 text-[10px] font-bold uppercase tracking-wider py-2 rounded-lg hover:bg-red-500/10 transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50"
             >
-              <Plus className="w-3.5 h-3.5" />
-              ADD
+              {whitelistBusy === "__all__" ? "DESELECTING…" : "↺ DESELECT ALL / START FRESH"}
             </button>
           </div>
         </div>

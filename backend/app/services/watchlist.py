@@ -14,10 +14,7 @@ from app.models import UserWhitelist
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SYMBOLS: List[str] = [
-    "BTC", "ETH", "SOL", "AVAX", "DOT", "TON", "PEPE", "BONK", "WIF", "DOGE",
-]
-
+DEFAULT_SYMBOLS: List[str] = []  # Start from scratch — users add tokens via search/whitelist.
 
 async def get_active_watchlist_symbols() -> List[str]:
     """Return the set of symbols actively watched by any user (base names, upper)."""
@@ -27,11 +24,9 @@ async def get_active_watchlist_symbols() -> List[str]:
         )).scalars().all()
     return [s.upper() for s in rows if s]
 
-
 async def get_watchlist_or_default() -> List[str]:
-    """Watchlist base symbols, or the default seed when the watchlist is empty."""
-    syms = await get_active_watchlist_symbols()
-    return syms if syms else list(DEFAULT_SYMBOLS)
+    """Watchlist base symbols. Starts empty — watching only begins once users add tokens."""
+    return await get_active_watchlist_symbols()
 
 
 async def get_watchlist_usc(*_):

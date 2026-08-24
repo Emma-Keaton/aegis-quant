@@ -27,27 +27,40 @@ const PAGE_STEPS: Record<string, OnboardingStep[]> = {
   logs: [
     { title: "Transaction Logs", body: "Every buy/sell is recorded with size, price, status, and a link to the block explorer." },
   ],
+  // A mode-aware "tokens" tour — fires before/as the user activates the AI trader.
+  tokens: [
+    { title: "Watch Tokens", body: "The AI can only trade tokens you've added to your watchlist. Open Settings → Token Whitelisting — search a coin (e.g. SOL, BONK, WIF) and ADD it so it's verified and watched." },
+    { title: "Verified Tokens Only", body: "Custom tokens are checked against the live index before they're added — only real, verified tokens get traded on." },
+    { title: "Mode & Activation", body: "Once you've watched tokens, the agent will auto-trade them: simulated with your PAPER balance in PAPER mode, or with your real funds/connected wallet in LIVE mode." },
+  ],
 };
 
 interface OnboardingOverlayProps {
-  page: "home" | "wallet" | "strategy" | "intel" | "logs";
+  page: "home" | "wallet" | "strategy" | "intel" | "logs" | "tokens";
   completedPages: string[];
   onPageCompleted: (page: string) => void;
+  forceTour?: boolean;
+  forceTourKey?: string;
 }
 
 export default function OnboardingOverlay({
   page,
   completedPages,
   onPageCompleted,
+  forceTour,
+  forceTourKey,
 }: OnboardingOverlayProps) {
   const [visible, setVisible] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [dismissed, setDismissed] = useState(false);
 
-  const steps = PAGE_STEPS[page] || [];
-  const completed = completedPages.includes(page);
+  const resolvedPage = (forceTour && forceTourKey) || page;
+  const steps = PAGE_STEPS[resolvedPage] || [];
+  const completed =
+    forceTour && forceTourKey ? false : completedPages.includes(resolvedPage);
 
   useEffect(() => {
+    setDismissed(false);
     if (completed) {
       setVisible(false);
       return;
@@ -56,7 +69,8 @@ export default function OnboardingOverlay({
       setStepIndex(0);
       setVisible(true);
     }
-  }, [page, completed]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forceTour, forceTourKey, page, completed]);
 
   if (!visible || dismissed) return null;
 
@@ -65,12 +79,12 @@ export default function OnboardingOverlay({
     try {
       await apiFetch("/api/onboarding/complete", {
         method: "POST",
-        body: JSON.stringify({ page }),
+        body: JSON.stringify({ page: resolvedPage }),
       });
     } catch {
       /* non-blocking */
     }
-    onPageCompleted(page);
+    onPageCompleted(resolvedPage);
   };
 
   const step = steps[stepIndex];

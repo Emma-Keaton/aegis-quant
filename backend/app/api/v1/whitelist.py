@@ -11,6 +11,27 @@ from app.schemas.whitelist import WhitelistAdd, WhitelistResponse
 router = APIRouter(prefix="/api/whitelist", tags=["whitelist"])
 
 
+@router.delete("/all")
+async def clear_whitelist(
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft-deactivate every whitelist row for the profile (start fresh)."""
+    telegram_id = user["id"]
+    result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    rows_res = await db.execute(
+        select(UserWhitelist).where(UserWhitelist.profile_id == profile.id).where(UserWhitelist.active == True)
+    )
+    for row in rows_res.scalars().all():
+        row.active = False
+    await db.commit()
+    return {"message": "Watchlist cleared", "cleared": True}
+
+
 @router.get("", response_model=List[WhitelistResponse])
 async def get_whitelist(
     user: dict = Depends(get_current_user),
