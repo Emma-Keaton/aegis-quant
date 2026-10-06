@@ -69,7 +69,7 @@ services:
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
-        value: llama-3.3-70b-versatile
+        value: qwen/qwen3.8-27b
       # Market data / trending
       - key: CMC_API_KEY
         sync: false
@@ -89,28 +89,29 @@ services:
       # Other
       - key: GRAFANA_URL
         sync: false
+      # Kronos prediction service. Now hosted on Modal, not Render: the previous
+      # `aegis-quant-kronos` Render service never loaded the model
+      # (KRONOS_LOAD_MODEL=0) and returned a straight-line placeholder. It has
+      # been removed rather than left to answer with fabricated forecasts.
       - key: KRONOS_SERVICE_URL
-        fromService:
-          name: aegis-quant-kronos
-          type: web
-          envVarName: RENDER_EXTERNAL_URL
         sync: false
-
-  # Kronos (AI forecasting, deployed separately)
-  - type: web
-    name: aegis-quant-kronos
-    env: python
-    region: oregon
-    plan: starter
-    buildCommand: cd kronos && pip install -r requirements.txt
-    startCommand: cd kronos && uvicorn app:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
-      - key: ENVIRONMENT
-        value: production
-      # Set KRONOS_LOAD_MODEL=1 + add kronos lib/torch to enable real inference (needs GPU)
-      - key: KRONOS_LOAD_MODEL
-        value: "0"
+      - key: KRONOS_API_KEY
         sync: false
+      # Market watch (dexscreener + Helius whale flows). Whale watch stays
+      # disabled without a key — the job is never scheduled.
+      - key: HELIUS_API_KEY
+        sync: false
+      - key: DEX_WATCH_ENABLED
+        value: "true"
+      - key: WHALE_WATCH_ENABLED
+        value: "true"
+      # Live-safety gates. Live orders are refused until BOTH of these are
+      # flipped AND the promotion gate has certified the profile:
+      #   LIVE_TRADING_ENABLED=false  → master switch (default off)
+      #   REQUIRE_PROMOTION_FOR_LIVE  → paper→live promotion gate (default on)
+      - key: LIVE_TRADING_ENABLED
+        value: "false"
+      - key: REQUIRE_PROMOTION_FOR_LIVE
+        value: "true"
+      - key: PROMOTION_ENABLED
+        value: "true"

@@ -191,14 +191,18 @@ async def _cmd_balance(chat_id: int) -> None:
         if not p:
             await send_message(chat_id, "No profile yet. Send /start.")
             return
-        pb = (await db.execute(select(PaperBalance).where(PaperBalance.profile_id == p.id))).scalar_one_or_none()
+        from sqlalchemy import func as _bf
+        _pb_sum = (await db.execute(
+            select(_bf.coalesce(_bf.sum(PaperBalance.balance), 0))
+            .where(PaperBalance.profile_id == p.id)
+        )).scalar()
         pos = (await db.execute(
             select(Position).where(Position.profile_id == p.id, Position.is_closed == False)
         )).scalars().all()
         cexs = (await db.execute(
             select(UserCredential).where(UserCredential.profile_id == p.id, UserCredential.is_active == True)
         )).scalars().all()
-        paper = float(pb.balance) if pb and pb.balance is not None else 0.0
+        paper = float(_pb_sum or 0)
         wallet_connected = p.wallet_connected
         wallet_net = p.wallet_network
         wallet_addr = p.wallet_address

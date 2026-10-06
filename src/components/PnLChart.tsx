@@ -1,17 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
-import { createChart, IChartApi, ISeriesApi, UTCTimestamp, AreaSeries, LineSeries } from "lightweight-charts";
-import { Maximize2, Minimize2, X, Info } from "lucide-react";
-import { UserState } from "../types";
+import { createChart, AreaSeries, LineSeries } from "lightweight-charts";
+import type { IChartApi, ISeriesApi, UTCTimestamp } from "lightweight-charts";
+import { Maximize2, Minimize2, Info } from "lucide-react";
+import type { UserState, BacktestResult, BacktestCurvePoint } from "../types";
 import { apiFetch } from "../api/client";
 
 interface PnLChartProps {
   userState: UserState;
-  backtestResult?: {
-    backtestCurve: any[];
-    benchmarkCurve: any[];
-    metrics: any;
-    active: boolean;
-  } | null;
+  backtestResult?: BacktestResult | null;
 }
 
 interface DataPoint {
@@ -264,7 +260,7 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
             lineStyle: 2,
           });
         }
-        const bData = backtestResult.backtestCurve.map((d: any) => ({
+        const bData = backtestResult.backtestCurve.map((d: BacktestCurvePoint) => ({
           time: d.time as UTCTimestamp,
           value: Math.round(d.value * scale * 100) / 100,
         }));
@@ -278,7 +274,7 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
           });
         }
         if (inlineBenchmarkSeriesRef.current && backtestResult.benchmarkCurve?.length > 0) {
-          const mData = backtestResult.benchmarkCurve.map((d: any) => ({
+          const mData = backtestResult.benchmarkCurve.map((d: BacktestCurvePoint) => ({
             time: d.time as UTCTimestamp,
             value: Math.round(d.value * scale * 100) / 100,
           }));
@@ -307,7 +303,7 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
             lineStyle: 2,
           });
         }
-        const bData = backtestResult.backtestCurve.map((d: any) => ({
+        const bData = backtestResult.backtestCurve.map((d: BacktestCurvePoint) => ({
           time: d.time as UTCTimestamp,
           value: Math.round(d.value * scale * 100) / 100,
         }));
@@ -321,7 +317,7 @@ export const PnLChart: React.FC<PnLChartProps> = ({ userState, backtestResult })
           });
         }
         if (fullscreenBenchmarkSeriesRef.current && backtestResult.benchmarkCurve?.length > 0) {
-          const mData = backtestResult.benchmarkCurve.map((d: any) => ({
+          const mData = backtestResult.benchmarkCurve.map((d: BacktestCurvePoint) => ({
             time: d.time as UTCTimestamp,
             value: Math.round(d.value * scale * 100) / 100,
           }));

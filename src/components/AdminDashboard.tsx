@@ -30,46 +30,55 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<"monitoring" | "system">("monitoring");
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
 
-  useEffect(() => {
-    fetch(`${getApiBase()}/api/config`, { cache: 'no-store' })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => setAppConfig(data))
-      .catch(() => {});
-
-    loadMetrics();
-    const interval = setInterval(loadMetrics, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
   const loadMetrics = async () => {
     try {
-      const res = await apiJson("/admin/metrics");
+      const res = await apiJson<MetricsData>("/api/admin/metrics");
       setMetrics(res);
-    } catch (err) {
-      console.error("Failed to load metrics:", err);
+    } catch {
+      console.error("Failed to load metrics");
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => {
+    fetch(`${getApiBase()}/api/config`, { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then((data: AppConfig | null) => {
+        setAppConfig(data);
+        return undefined;
+      })
+      .catch(() => undefined);
+
+    void (async () => {
+      await loadMetrics();
+    })();
+    const interval = setInterval(loadMetrics, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   const handleShutdown = async () => {
     try {
-      await apiJson("/admin/shutdown", {
+      await apiJson("/api/admin/shutdown", {
         method: "POST",
         body: JSON.stringify({ confirm: "SHUTDOWN" }),
       });
+      setShutdownConfirmed(true);
       alert("Admin shutdown initiated");
-    } catch (err) {
+    } catch {
       alert("Shutdown failed");
     }
   };
 
   const handleRefresh = async () => {
     try {
-      const res = await apiJson("/admin/refresh-market", { method: "POST" });
+      const res = await apiJson<{ status?: string; message?: string }>(
+        "/api/admin/refresh-market",
+        { method: "POST" },
+      );
       setRefreshStatus({ status: res.status, message: res.message });
       loadMetrics();
-    } catch (err) {
+    } catch {
       setRefreshStatus({ status: "error", message: "Market refresh failed" });
     }
   };
@@ -234,7 +243,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               </div>
             ) : (
               <button
-                onClick={() => setShutdownConfirmed(true)}
+                onClick={handleShutdown}
                 className="w-full bg-red-500 text-black font-bold py-3 rounded-xl hover:bg-red-400 transition-all uppercase tracking-wider flex items-center justify-center gap-2"
               >
                 <Zap className="w-4 h-4" /> Initiate Graceful Shutdown

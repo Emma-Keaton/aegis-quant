@@ -246,7 +246,8 @@ async def delete_my_source(
 @router.get("/admin", response_model=SourceListResponse)
 async def get_admin_sources(
     source_type: Optional[str] = None,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get admin-managed baseline sources."""
     query = select(AdminSource)

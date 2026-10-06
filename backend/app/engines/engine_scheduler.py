@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.engines.engine_a import EngineA
 from app.engines.engine_b import EngineB
 from app.config import get_settings
-from app.services.forecasting import get_forecasting_service
+from app.services.kronos_service import get_kronos_service
 
 logger = logging.getLogger(__name__)
 
@@ -20,29 +20,71 @@ DEFAULT_FORECAST_TICKERS = ["SOL", "TON", "BTC", "ETH", "PEPE", "BONK", "DOGE", 
 
 
 async def precompute_forecasts() -> None:
-    """Batch-precompute replacement forecasts for the watchlist into the cache.
+    """Warm real Kronos forecasts for the watchlist, then score old ones.
 
     Runs on an interval in the worker so the API reads cached, ranked results
     instead of fitting on the request path.
+
+    Kronos is used rather than the replacement forecaster: the replacement is
+    only a fallback for when Kronos is unreachable. This also drives the
+    calibration loop — every forecast recorded here is later scored against
+    realised prices by `KronosService.score_pending`, which is how `confidence`
+    becomes trustworthy.
     """
     settings = get_settings()
     if not settings.FORECAST_BATCH_ENABLED:
         return
-    from app.services.market_service import get_market_service
 
-    svc = get_forecasting_service()
-    market = get_market_service()
+    kronos = get_kronos_service()
     tickers = DEFAULT_FORECAST_TICKERS[: settings.FORECAST_BATCH_TOP_N]
+
     for ticker in tickers:
         try:
-            ohlcv = await market.fetch_ohlcv(
-                symbol=ticker, exchange_id="binance", timeframe="1h", limit=200
+            await kronos.forecast_symbol(
+                ticker,
+                timeframe="1h",
+                horizon=30,
+                samples=10,
+                exchange_id="binance",
+                limit=200,
             )
-            closes = [e["close"] for e in ohlcv] if ohlcv else None
-            if closes and len(closes) >= 16:
-                await svc.forecast(symbol=ticker, closes=closes, horizon=30, samples=30)
-        except Exception as e:
-            logger.warning(f"Forecast precompute failed for {ticker}: {e}")
+        except Exception as exc:
+            logger.warning("Kronos precompute failed for %s: %s", ticker, exc)
+
+    # Score anything whose horizon has now elapsed.
+    try:
+        scored = await kronos.score_pending()
+        if scored:
+            logger.info("Scored %d Kronos forecasts", len(scored))
+        summary = await kronos.calibration_summary()
+        if summary.get("scored"):
+            logger.info("Kronos calibration: %s", summary)
+    except Exception as exc:
+        logger.warning("Kronos scoring pass failed: %s", exc)
+
+
+async def refit_learned_parameters() -> None:
+    """Refit global thresholds and promote a model on accumulated evidence.
+
+    Learned parameters and the active model are workspace-global, so this runs
+    once for the whole workspace rather than per profile: every device's scored
+    trades count toward the same estimate. Promotion is still gated on a
+    statistically significant record, so an early run cannot install a model on
+    noise.
+    """
+    kronos = get_kronos_service()
+    try:
+        outcome = await kronos.refit()
+    except Exception as exc:
+        logger.warning("Learned-parameter refit failed: %s", exc)
+        return
+    logger.info(
+        "Refit: %s samples, validated=%s, promoted=%s (%s)",
+        outcome.get("sample_size"),
+        outcome.get("validated"),
+        outcome.get("promoted_model") if outcome.get("promoted") else None,
+        outcome.get("reason"),
+    )
 
 
 async def start_engines():
@@ -92,6 +134,17 @@ async def start_engines():
         await precompute_forecasts()
     except Exception as e:
         logger.warning(f"Initial forecast precompute skipped: {e}")
+
+    # Schedule the global learner. Refitting on every forecast batch would be
+    # wasteful (the gates barely move on one new sample) and would rewrite the
+    # parameter history constantly; hourly is enough to keep thresholds current.
+    scheduler.add_job(
+        refit_learned_parameters,
+        IntervalTrigger(hours=1),
+        id="learned_parameter_refit",
+        max_instances=1,
+        replace_existing=True,
+    )
     
     # Schedule daily stats reset
     scheduler.add_job(
@@ -120,7 +173,47 @@ async def start_engines():
         max_instances=1,
         replace_existing=True
     )
-    
+
+    # Stop-loss / take-profit enforcement on refreshed marks. Runs right after
+    # mark-to-market so triggers are evaluated against the freshest price.
+    scheduler.add_job(
+        manage_positions,
+        IntervalTrigger(seconds=15),
+        id="manage_positions",
+        max_instances=1,
+        replace_existing=True,
+    )
+
+    # Hot-token DEX watcher: pairs → rank → spike detection → Telegram pings.
+    settings = get_settings()
+    if settings.DEX_WATCH_ENABLED:
+        scheduler.add_job(
+            dex_watch_tick,
+            IntervalTrigger(seconds=settings.DEX_WATCH_INTERVAL_SECONDS),
+            id="dex_watch",
+            max_instances=1,
+            replace_existing=True,
+        )
+
+    # Whale-flow watcher (Helius): creates signal rows + Telegram pings.
+    if settings.HELIUS_API_KEY:
+        scheduler.add_job(
+            whale_watch_tick,
+            IntervalTrigger(seconds=settings.WHALE_WATCH_INTERVAL_SECONDS),
+            id="whale_watch",
+            max_instances=1,
+            replace_existing=True,
+        )
+
+    # Paper→live promotion gate: evaluates evidence, records decisions, pings.
+    scheduler.add_job(
+        promotion_cycle,
+        IntervalTrigger(hours=settings.PROMOTION_INTERVAL_HOURS),
+        id="promotion_cycle",
+        max_instances=1,
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info("Engines started successfully")
 
@@ -191,6 +284,44 @@ async def copytrade_cycle() -> None:
         await run_copytrade_scan_once()
     except Exception as e:
         logger.warning(f"Copy-trade scan cycle failed: {e}")
+
+
+async def manage_positions() -> None:
+    """Enforce stop-loss / take-profit on open positions."""
+    try:
+        from app.services.position_manager import manage_open_positions
+        closed = await manage_open_positions()
+        if closed:
+            logger.info("SL/TP manager closed %d position(s)", closed)
+    except Exception as e:
+        logger.warning("Position management tick failed: %s", e)
+
+
+async def dex_watch_tick() -> None:
+    """Collect DEX pairs, detect spikes, persist snapshots, notify."""
+    try:
+        from app.services import dexwatch
+        await dexwatch.tick()
+    except Exception as e:
+        logger.warning("Dex watch tick failed: %s", e)
+
+
+async def whale_watch_tick() -> None:
+    """Collect whale transactions, surface flows as signals + notifications."""
+    try:
+        from app.services import whale_watch
+        await whale_watch.tick()
+    except Exception as e:
+        logger.warning("Whale watch tick failed: %s", e)
+
+
+async def promotion_cycle() -> None:
+    """Run the paper→live promotion gate for every active profile."""
+    try:
+        from app.services import promotion
+        await promotion.run_cycle()
+    except Exception as e:
+        logger.warning("Promotion cycle failed: %s", e)
 
 
 def get_engine_a() -> EngineA:

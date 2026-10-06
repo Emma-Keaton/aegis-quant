@@ -8,7 +8,7 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.telegram_auth import get_current_user
@@ -235,11 +235,12 @@ async def get_state(
     risk = await _map_risk_settings(profile, db)
     
     # Paper balance
-    bal_result = await db.execute(
-        select(PaperBalance).where(PaperBalance.profile_id == profile.id)
-    )
-    paper_bal = bal_result.scalar_one_or_none()
-    balance = float(paper_bal.balance) if paper_bal else 124.50
+    from sqlalchemy import func as _func
+    _cnt, _sum = (await db.execute(
+        select(_func.count(PaperBalance.id), _func.coalesce(_func.sum(PaperBalance.balance), 0))
+        .where(PaperBalance.profile_id == profile.id)
+    )).one()
+    balance = float(_sum) if _cnt else 124.50
     
     # Calculate unrealized PnL from open positions
     pos_result = await db.execute(
@@ -341,9 +342,12 @@ async def update_paper_balance(
         raise HTTPException(status_code=404, detail="Profile not found")
     
     bal_result = await db.execute(
-        select(PaperBalance).where(PaperBalance.profile_id == profile.id)
+        select(PaperBalance).where(
+            PaperBalance.profile_id == profile.id,
+            PaperBalance.asset == "TON",
+        )
     )
-    paper_bal = bal_result.scalar_one_or_none()
+    paper_bal = bal_result.scalars().first()
     if paper_bal:
         paper_bal.balance = num
     else:
@@ -488,21 +492,90 @@ async def panic_close(
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    """Halt trading and liquidate open positions.
+
+    This previously did `p.is_closed = True` for every position and returned
+    "All positions liquidated". Nothing was liquidated: no order was routed, no
+    paper balance was credited back, and no realised PnL was recorded. The
+    positions were marked closed in the database while the balance still
+    reflected the original debit, so `/api/state` and the balance disagreed and
+    no closed trade left any trace of what it made.
+
+    Each close is now routed through `ExecutionRouter`, which is what performs
+    the actual sell and credits the balance.
+    """
+    from decimal import Decimal
+
+    from sqlalchemy import select as _select
+
+    from app.engines.execution_router import ExecutionRouter
+
     telegram_id = user["id"]
     result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
-    
-    # Close all positions
-    pos_result = await db.execute(select(Position).where(Position.profile_id == profile.id))
-    positions = pos_result.scalars().all()
-    for p in positions:
-        p.is_closed = True
+
+    # Stop new entries first, so a sweep cannot open a position while we are
+    # closing them.
     profile.bot_enabled = False
     await db.commit()
-    
-    return {"status": "success", "message": "All positions liquidated, trading system halted."}
+
+    pos_result = await db.execute(
+        _select(Position).where(
+            Position.profile_id == profile.id,
+            Position.is_closed.is_(False),
+        )
+    )
+    positions = list(pos_result.scalars().all())
+
+    router = ExecutionRouter()
+    from app.services.position_manager import close_with_router
+    liquidated, failed, realized_total = 0, [], Decimal("0")
+    breaker_pnls = []
+
+    for p in positions:
+        size = float(p.size or 0)
+        if size <= 0:
+            p.is_closed = True
+            continue
+        try:
+            pnl = await close_with_router(
+                db, profile, p, router=router,
+                exit_price_hint=float(p.current_price or 0),
+            )
+        except Exception as exc:
+            # One position failing must not abandon the rest: a panic button that
+            # half-works is worse than one that reports what it could not do.
+            failed.append({"symbol": p.symbol, "error": str(exc)})
+            continue
+
+        realized_total += Decimal(str(pnl))
+        breaker_pnls.append(pnl)
+        liquidated += 1
+
+    await db.commit()
+    await router.close_all()
+
+    # Realised outcomes feed the circuit breaker (order: closes happened).
+    for _pnl in breaker_pnls:
+        try:
+            from app.services import circuit_breaker
+            await circuit_breaker.record_outcome(_pnl)
+        except Exception:
+            pass
+
+    message = f"Halted trading. Liquidated {liquidated} position(s)."
+    if failed:
+        message += f" {len(failed)} could not be closed and remain open."
+    return {
+        "status": "success" if not failed else "partial",
+        "message": message,
+        "liquidated": liquidated,
+        "failed": failed,
+        "realized_pnl": float(realized_total),
+        "open_positions": len(failed),
+    }
 
 
 @router.post("/api/wallet-connect")

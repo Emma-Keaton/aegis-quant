@@ -31,10 +31,12 @@ httpx
 # installed here — keep this service lean on memory).
 pandas
 numpy
+scipy>=1.11.0  # promotion.py uses scipy.stats (skew/kurtosis, deflated Sharpe)
 
-# Optional: statistical forecasting fallback tier (ETS/Holt-Winters). Disabled by
-# default to stay lean; the deterministic tier is used instead via a guarded import.
-# statsmodels>=0.14.0
+# Statistical forecasting + time-series analytics (GARCH, ADF, cointegration).
+# Guarded imports elsewhere degrade gracefully if this fails to install.
+statsmodels>=0.14.0
+arch>=5.0.0  # GARCH(1,1) forecasts (statsmodels itself has no GARCH)
 
 # Social scraping (Engine B)
 feedparser

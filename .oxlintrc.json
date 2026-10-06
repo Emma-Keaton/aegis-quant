@@ -1,0 +1,45 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "react", "oxc", "promise"],
+  "env": {
+    "browser": true,
+    "es2024": true,
+    "node": true
+  },
+  "settings": {
+    "react": {
+      "version": "19.0"
+    }
+  },
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/coverage/**",
+    "**/build/**",
+    "**/*.test.*",
+    "**/*.spec.*"
+  ],
+  "rules": {
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+
+    "no-unused-vars": "error",
+    "no-unreachable": "error",
+    "no-control-regex": "off",
+    "require-await": "error",
+
+    "typescript/consistent-type-imports": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-unused-vars": "error",
+
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "error",
+
+    "promise/always-return": "error",
+    "promise/no-return-wrap": "error",
+    "promise/valid-params": "error",
+
+    "unicorn/prefer-node-protocol": "error",
+    "unicorn/no-invalid-fetch-options": "off",
+    "unicorn/no-thenable": "off"
+  }
+}

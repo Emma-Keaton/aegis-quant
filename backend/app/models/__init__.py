@@ -5,10 +5,15 @@ from typing import Optional, List
 from sqlalchemy import (
     Column, String, Integer, BigInteger, Boolean, DateTime, Numeric, Text, JSON, ForeignKey, Enum as SQLEnum, Index, UniqueConstraint
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID, JSONB as _PG_JSONB
 from sqlalchemy.orm import relationship
 from app.database import Base
 import enum
+
+# JSONB only exists on postgres; fall back to plain JSON on sqlite so the test
+# suite can create these tables in-memory (same rationale as the sqlalchemy.Uuid
+# choice in kronos_ledger.py).
+JSONB = _PG_JSONB().with_variant(JSON(), "sqlite")
 
 
 class TradeMode(str, enum.Enum):
@@ -205,6 +210,18 @@ class TradeLog(Base):
     error_message = Column(Text, nullable=True)
     executed_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
+    # Realised outcome of a closing trade.
+    #
+    # Without these, equity could only ever be reconstructed from unrealised
+    # marks on open positions: a closed trade left no trace of what it actually
+    # made, so "does paper trading work?" had no answer.
+    realized_pnl = Column(Numeric(20, 8), nullable=True)
+    # Set on the row that closes a position. `entry_price`/`exit_price` are kept
+    # so the cost basis survives even after the position row is gone.
+    entry_price = Column(Numeric(20, 8), nullable=True)
+    exit_price = Column(Numeric(20, 8), nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
     profile = relationship("Profile", back_populates="trades")
 
     __table_args__ = (Index("idx_trades_profile_time", "profile_id", "executed_at"),)
@@ -296,6 +313,10 @@ class RiskSettings(Base):
     max_daily_drawdown_pct = Column(Numeric(5, 2), default=5.0, nullable=False)
     whitelist_only = Column(Boolean, default=True, nullable=False)
     spot_margin_enabled = Column(Boolean, default=True, nullable=False)
+    # Base order size in USD for the "fixed sizing" mode. The column has existed
+    # in risk_settings since the initial schema; the model was missing it, so
+    # every read (`rs.base_trade_usd`) raised AttributeError.
+    base_trade_usd = Column(Numeric(5, 2), default=10.0, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
@@ -345,6 +366,28 @@ class CopyTradeSubscription(Base):
     __table_args__ = (
         UniqueConstraint("profile_id", "channel_id", name="uq_profile_channel_sub"),
     )
+
+
+# Kronos prediction ledger + learned parameters + model assignments.
+# Imported for the side effect of registering the tables on Base.metadata, so
+# `init_db`'s create_all picks them up. Importing the names too keeps them
+# reachable as `from app.models import KronosForecast`.
+from app.models.kronos_ledger import (  # noqa: E402,F401
+    GLOBAL_KEY,
+    KronosForecast,
+    LearnedParameter,
+    LearnedParameterHistory,
+    ModelAssignment,
+)
+
+
+# Market watchers (dex snapshots, whale flows) + promotion/circuit-breaker state.
+from app.models.watch_promotion import (  # noqa: E402,F401
+    BreakerState,
+    DexSnapshot,
+    PromotionDecision,
+    WhaleFlow,
+)
 
 
 # BigInteger import

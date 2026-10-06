@@ -15,7 +15,6 @@ class ConnectionManager:
 
     def __init__(self):
         self.active_connections: Dict[int, Set[WebSocket]] = {}
-        self.price_tasks: Dict[int, asyncio.Task] = {}
 
     async def connect(self, websocket: WebSocket, user_id: int):
         await websocket.accept()
@@ -23,19 +22,12 @@ class ConnectionManager:
             self.active_connections[user_id] = set()
         self.active_connections[user_id].add(websocket)
         print(f"User {user_id} connected. Total connections: {len(self.active_connections[user_id])}")
-        # Start background price poller if not already running
-        if user_id not in self.price_tasks:
-            self.price_tasks[user_id] = asyncio.create_task(self._poll_prices(user_id))
 
     def disconnect(self, websocket: WebSocket, user_id: int):
         if user_id in self.active_connections:
             self.active_connections[user_id].discard(websocket)
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
-                # Cancel background task when no connections
-                task = self.price_tasks.pop(user_id, None)
-                if task:
-                    task.cancel()
         print(f"User {user_id} disconnected. Remaining: {len(self.active_connections.get(user_id, set()))}")
 
     async def send_personal_message(self, user_id: int, message: dict):
@@ -56,25 +48,6 @@ class ConnectionManager:
         for user_id in list(self.active_connections.keys()):
             await self.send_personal_message(user_id, message)
 
-    async def _poll_prices(self, user_id: int):
-        """Periodically fetch prices and send NEW_SIGNAL updates."""
-        import httpx
-        url = "http://localhost:8000/api/token-watch"  # Adjust if different port
-        while True:
-            try:
-                async with httpx.AsyncClient(timeout=5) as client:
-                    resp = await client.get(url)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        await self.send_personal_message(user_id, {
-                            "type": "NEW_SIGNAL",
-                            "data": data.get("data", {}),
-                            "timestamp": data.get("timestamp", ""),
-                        })
-            except Exception as e:
-                print(f"Price poll error for user {user_id}: {e}")
-            await asyncio.sleep(10)
-
 
 manager = ConnectionManager()
 
@@ -91,6 +64,7 @@ async def websocket_endpoint(
         verified = await verify_telegram_init_data(init_data, settings.TELEGRAM_BOT_TOKEN)
         user_id = verified["user"]["id"]
     except Exception as e:
+        print(f"WebSocket auth failed: {e}")
         await websocket.close(code=4003, reason="Invalid initData")
         return
     

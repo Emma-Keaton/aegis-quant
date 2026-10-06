@@ -6,7 +6,10 @@ Message sources:
   - Every registered channel is polled, decoded by the Groq "parser model",
     gated by the subscription's confidence threshold, then routed to execution.
 """
+import hashlib
 import logging
+import time
+from collections import OrderedDict
 from typing import List
 
 from sqlalchemy import select
@@ -19,6 +22,33 @@ from app.services.signal_parser import parse_signal_text
 from app.services.trade_executor import execute_parsed_signal
 
 logger = logging.getLogger(__name__)
+
+# The scanner polls the same channel every cycle, so the last N messages are
+# seen repeatedly. Without this ledger every qualifying message would be traded
+# again on each pass. Keyed by channel + message text (fetch_channel returns
+# text only, no message ids) and aged out so a genuinely repeated call signal
+# later in the day can still trade.
+_PROCESSED_TTL_SECONDS = 6 * 3600
+_MAX_PROCESSED = 4096
+_processed: "OrderedDict[str, float]" = OrderedDict()
+
+
+def _fingerprint(channel_id: str, text: str) -> str:
+    return hashlib.sha256(f"{channel_id}\n{text}".encode("utf-8")).hexdigest()
+
+
+def _already_processed(fingerprint: str) -> bool:
+    now = time.monotonic()
+    for key in [k for k, ts in _processed.items() if now - ts > _PROCESSED_TTL_SECONDS]:
+        _processed.pop(key, None)
+    return fingerprint in _processed
+
+
+def _mark_processed(fingerprint: str) -> None:
+    _processed[fingerprint] = time.monotonic()
+    _processed.move_to_end(fingerprint)
+    while len(_processed) > _MAX_PROCESSED:
+        _processed.popitem(last=False)
 
 
 async def fetch_channel_messages(channel_id: str, limit: int = 5) -> List[str]:
@@ -76,6 +106,10 @@ async def run_copytrade_scan_once() -> dict:
             threshold = sub.confidence_threshold if sub.confidence_threshold is not None else 70
             for text in messages:
                 tally["scanned"] += 1
+                fingerprint = _fingerprint(sub.channel_id, text)
+                if _already_processed(fingerprint):
+                    tally["skipped"] += 1
+                    continue
                 parsed = await parse_signal_text(text)
                 if not parsed:
                     continue
@@ -83,6 +117,9 @@ async def run_copytrade_scan_once() -> dict:
                 if int(parsed.get("confidence") or 0) < threshold:
                     tally["skipped"] += 1
                     continue
+                # Claim the message before executing so a failing trade is not
+                # retried (and re-billed) on every subsequent poll.
+                _mark_processed(fingerprint)
                 try:
                     res = await execute_parsed_signal(
                         sub.profile_id, parsed, source=f"telegram:{sub.channel_id}"

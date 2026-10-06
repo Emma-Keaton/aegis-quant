@@ -8,7 +8,11 @@
     "build": "vite build",
     "start": "serve -s dist",
     "clean": "rm -rf dist && rm -rf node_modules",
-    "lint": "tsc --noEmit"
+    "lint": "oxlint src vite.config.ts",
+    "lint:fix": "oxlint --fix src vite.config.ts",
+    "lint:ts": "tsc --noEmit",
+    "check": "npm run lint && npm run lint:ts",
+    "lint:ci": "oxlint --deny-warnings src vite.config.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -34,6 +38,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
+    "oxlint": "^1.20.0",
     "tailwindcss": "^4.1.14",
     "typescript": "^5.3.0"
   }

@@ -41,7 +41,7 @@ async def submit_trade(
     headers = {"Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.post(target, json=signal.__root__, headers=headers, timeout=15)
+            resp = await client.post(target, json=signal.root, headers=headers, timeout=15)
         except httpx.RequestError as exc:
             raise HTTPException(status_code=502, detail=f"Failed to reach QuantDinger: {exc}")
     if resp.status_code != 200:

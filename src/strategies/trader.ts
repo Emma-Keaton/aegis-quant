@@ -20,7 +20,7 @@ export interface TradeProposal {
  * proposal. Real deployments should invoke an LLM via HTTP API; this
  * implementation applies the matched strategy's scoring guidance.
  */
-export function createTrader(_: unknown) {
+export function createTrader() {
   return {
     run(state: TraderState): TradeProposal {
       const strategy: StrategyConfig | undefined = state.strategy

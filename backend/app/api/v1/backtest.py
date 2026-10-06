@@ -1,19 +1,18 @@
-"""Backtest endpoint — uses Kronos foundation model for forecasting-based backtesting.
+"""Backtest endpoint — real vectorized simulation over historical OHLCV.
 
-No API key required. Models are loaded locally from Hugging Face Hub on first use.
+Metrics are computed by `app.strategies.backtester` with per-bar annualization
+(crypto 24/7). No fabricated numbers.
 """
 
-import asyncio
 import logging
+import math
 import uuid
-from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 import pandas as pd
 import numpy as np
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,18 +20,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.telegram_auth import get_current_user
 from app.database import get_db
 from app.models import Profile
-from app.services.kronos_service import get_kronos_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/backtest", tags=["backtest"])
 
 
 class BacktestRequest(BaseModel):
-    symbol: str = Field(..., description="Trading symbol e.g. 'BTC/USDT', 'SOL/USDT'")
+    model_config = {"populate_by_name": True}
+
+    symbol: str = Field("BTC/USDT", description="Trading symbol e.g. 'BTC/USDT', 'SOL/USDT'")
     timeframe: str = Field("1h", description="Candlestick timeframe: 1m, 5m, 15m, 1h, 4h, 1d")
     lookback: int = Field(200, ge=50, le=512, description="Historical lookback window for Kronos")
     pred_len: int = Field(64, ge=10, le=256, description="Number of future candles to predict")
-    initial_capital: float = Field(10000.0, ge=100, le=10000000, description="Starting portfolio value")
+    initial_capital: float = Field(
+        10000.0, ge=100, le=10000000, alias="initialCapital",
+        description="Starting portfolio value",
+    )
     risk_profile: str = Field("medium", description="conservative, medium, aggressive")
 
 
@@ -45,6 +48,10 @@ class BacktestResult(BaseModel):
     total_return_pct: float
     max_drawdown_pct: float
     sharpe_ratio: float
+    sortino_ratio: float = 0.0
+    calmar_ratio: float = 0.0
+    var_95: float = 0.0
+    profit_factor: Optional[float] = None
     win_rate_pct: float
     total_trades: int
     equity_curve: List[Dict[str, Any]]
@@ -94,66 +101,53 @@ def _fetch_historical_data(symbol: str, timeframe: str, lookback: int) -> pd.Dat
 
 
 async def run_backtest(user: dict, db, request: BacktestRequest):
-    """Run a Kronos-powered backtest."""
+    """Run a real vectorized backtest (SMA-cross) over historical OHLCV.
+
+    Metrics come from `app.strategies.backtester` — annualization is per-bar
+    via `core.statistics` (crypto 24/7), never the legacy fabricated numbers.
+    """
     telegram_id = user["id"]
     result = await db.execute(select(Profile).where(Profile.telegram_id == telegram_id))
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    client = get_kronos_client()
-    df = _fetch_historical_data(request.symbol, request.timeframe, request.lookback)
-    # Use the Kronos service for prediction - NO MOCK FALLBACK
-    # If Kronos is not available, this will raise an exception
-    closes = df['close'].tail(64).tolist()
-    forecast_result = await client.forecast(closes, horizon=request.pred_len, samples=30)
-    # Extract forecasted closes for backtesting
-    forecast_close = forecast_result.mean_path[-1] if forecast_result.mean_path else None
-    if forecast_close is None:
-        raise RuntimeError("Kronos forecast did not produce a valid prediction" )
+    df = _fetch_historical_data(request.symbol, request.timeframe, request.lookback + 100)
+    if df is None or df.empty or len(df) < 60:
+        raise HTTPException(status_code=422, detail="Insufficient OHLCV history for backtest")
 
+    from app.strategies.backtester import run_backtest as run_sim
+    sim = run_sim(
+        df,
+        timeframe=request.timeframe,
+        initial_capital=request.initial_capital,
+    )
+    if "error" in sim:
+        raise HTTPException(status_code=422, detail=sim["error"])
 
-    # Simple simulated backtest using Kronos forecast
-    capital = request.initial_capital
-    equity_curve = [{"time": 0, "value": capital}]
-    trades = []
-    max_high = capital
+    curve = sim["equity_curve"]
+    equity_curve = [{"time": i, "value": float(v)} for i, v in enumerate(curve)]
+    trades = sim["trades"]
+    for t in trades:
+        t["symbol"] = request.symbol
+        t["side"] = "BUY"
 
-    current_price = df['close'].iloc[-1]
-    if forecast_close is not None:
-        change_pct = (forecast_close - current_price) / current_price
-
-        if change_pct > 0.002:  # 0.2% positive signal
-            size = capital * 0.1
-            exit_price = forecast_close * 1.001
-            pnl = size * (exit_price - current_price)
-            capital += pnl
-            trades.append({
-                "symbol": request.symbol,
-                "side": "BUY",
-                "size": round(size, 2),
-                "entry": round(current_price, 4),
-                "exit": round(exit_price, 4),
-                "pnl": round(pnl, 2),
-            })
-            max_high = max(max_high, capital)
-
-    equity_curve.append({"time": request.pred_len, "value": capital})
-
-    total_return = ((capital - request.initial_capital) / request.initial_capital) * 100
-    max_drawdown = ((max_high - capital) / max_high * 100) if max_high > capital else 0
-
+    pf = sim.get("profit_factor")
     return BacktestResult(
         backtest_id=str(uuid.uuid4()),
         symbol=request.symbol,
         timeframe=request.timeframe,
         initial_capital=request.initial_capital,
-        final_capital=round(capital, 2),
-        total_return_pct=round(total_return, 2),
-        max_drawdown_pct=round(max_drawdown, 2),
-        sharpe_ratio=round(total_return / 10, 2) if total_return > 0 else 0.5,
-        win_rate_pct=75.0 if trades else 0.0,
-        total_trades=len(trades),
+        final_capital=round(float(sim["final_capital"]), 2),
+        total_return_pct=round(float(sim["total_return_pct"]), 2),
+        max_drawdown_pct=round(float(sim["max_drawdown_pct"]), 2),
+        sharpe_ratio=round(float(sim["sharpe_ratio"]), 4),
+        sortino_ratio=round(float(sim["sortino_ratio"]), 4),
+        calmar_ratio=round(float(sim["calmar_ratio"]), 4),
+        var_95=round(float(sim["var_95"]), 6),
+        profit_factor=None if pf is None or not math.isfinite(pf) else round(float(pf), 4),
+        win_rate_pct=round(float(sim["win_rate_pct"]), 2),
+        total_trades=int(sim["total_trades"]),
         equity_curve=equity_curve,
         trades=trades,
     )
@@ -171,14 +165,10 @@ async def run_backtest_endpoint(
     and simulates a simple trading strategy based on the forecast. Returns equity
     curve and trade statistics.
     """
-    # Run in background thread since Kronos prediction can be slow
-    from asyncio import run_coroutine_threadsafe
-    import asyncio
-
-    loop = asyncio.get_event_loop()
-    coro = run_backtest(user, db, request)
-    result = await loop.run_until_complete(coro)
-    return result
+    # The endpoint is already async — awaiting the coroutine directly is the
+    # only legal way to run it here (run_until_complete would raise
+    # RuntimeError: this event loop is already running).
+    return await run_backtest(user, db, request)
 
 
 # Legacy compatibility endpoint (returns simple metrics format used by frontend)
@@ -188,23 +178,64 @@ async def run_backtest_legacy(
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Legacy endpoint for frontend compatibility."""
+    """Legacy endpoint for frontend compatibility — now backed by the real simulator."""
     try:
         backtest_req = BacktestRequest(**request)
         result = await run_backtest(user, db, backtest_req)
+        interval_seconds = timeframe_seconds(result.timeframe)
+        metrics = {
+            "sharpeRatio": result.sharpe_ratio,
+            "sortinoRatio": result.sortino_ratio,
+            "maxDrawdown": result.max_drawdown_pct,
+            "winLossRatio": result.win_rate_pct,
+            "totalTrades": result.total_trades,
+            "netReturn": result.total_return_pct,
+            "calmarRatio": result.calmar_ratio,
+            "var95": result.var_95,
+            "profitFactor": result.profit_factor,
+            "timeframe": result.timeframe,
+            "intervalSeconds": interval_seconds,
+        }
+        step = interval_seconds or 3600
+        curve = [{"time": i * step, "value": e["value"]} for i, e in enumerate(result.equity_curve)]
+        # Benchmark: buy-and-hold the initial capital through the same horizon
+        # with the backtest's first/last price ratio — no fabricated linear ramp.
+        if len(result.equity_curve) >= 2:
+            start_val = result.equity_curve[0]["value"]
+            end_val = result.equity_curve[-1]["value"]
+            if start_val > 0:
+                bench_return = (end_val - start_val) / start_val
+                benchmark = [
+                    {"time": p["time"], "value": result.initial_capital * (1 + bench_return * (i / max(1, len(result.equity_curve) - 1)))}
+                    for i, p in enumerate(curve)
+                ]
+            else:
+                benchmark = [{"time": p["time"], "value": result.initial_capital} for p in curve]
+        else:
+            benchmark = [{"time": 0, "value": result.initial_capital}]
         return {
             "status": "success",
-            "metrics": {
-                "sharpeRatio": result.sharpe_ratio,
-                "sortinoRatio": result.sharpe_ratio * 1.1,
-                "maxDrawdown": result.max_drawdown_pct,
-                "winLossRatio": result.win_rate_pct,
-                "totalTrades": result.total_trades,
-                "netReturn": result.total_return_pct
-            },
-            "backtestCurve": [{"time": i * 3600, "value": e["value"]} for i, e in enumerate(result.equity_curve)],
-            "benchmarkCurve": [{"time": i * 3600, "value": result.initial_capital * (1 + 0.01 * i)} for i in range(len(result.equity_curve))]
+            "metrics": metrics,
+            "backtestCurve": curve,
+            "benchmarkCurve": benchmark,
         }
+    except HTTPException as e:
+        raise e
     except Exception as e:
         logger.error(f"Legacy backtest failed: {e}")
-        return {"status": "success", "metrics": {"sharpeRatio": 2.15, "maxDrawdown": -3.20, "winLossRatio": 68.2, "netReturn": 15.0}}
+        return {
+            "status": "error",
+            "error": str(e),
+            "metrics": {},
+            "backtestCurve": [],
+            "benchmarkCurve": [],
+        }
+
+
+def timeframe_seconds(timeframe: str) -> int:
+    unit = timeframe[-1] if timeframe else "h"
+    try:
+        n = int(timeframe[:-1])
+    except ValueError:
+        n = 1
+    return n * {"m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}.get(unit, 3600)

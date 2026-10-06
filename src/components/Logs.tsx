@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { History, Search, ArrowUpRight, ArrowDownRight, RefreshCw, ExternalLink, Calendar, Filter, ShieldAlert, Shield } from "lucide-react";
-import { TransactionLog } from "../types";
+import React, { useState, useEffect, useCallback } from "react";
+import { History, ArrowUpRight, ArrowDownRight, ExternalLink, Filter, ShieldAlert, Shield } from "lucide-react";
+import type { TransactionLog } from "../types";
 import { apiFetch, clearSession } from "../api/client";
 import AdminDashboard from "./AdminDashboard";
 
@@ -71,7 +71,7 @@ export default function Logs() {
   const [timeframeFilter, setTimeframeFilter] = useState<string>("ALL");
   const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
 
-  const fetchLogs = async (showLoading = true) => {
+  const fetchLogs = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
     try {
       const url = typeFilter === "ALL" ? "/api/logs" : `/api/logs?type=${typeFilter}`;
@@ -79,7 +79,7 @@ export default function Logs() {
       if (!res.ok) {
         throw new Error("Failed to load execution logs");
       }
-      const json = await res.json();
+      const json = (await res.json()) as { status?: string; data?: TransactionLog[] };
       if (json.status === "success" && json.data) {
         setLogs(json.data);
       }
@@ -88,11 +88,13 @@ export default function Logs() {
     } finally {
       if (showLoading) setLoading(false);
     }
-  };
+  }, [typeFilter]);
 
   useEffect(() => {
-    fetchLogs();
-  }, [typeFilter]);
+    void (async () => {
+      await fetchLogs();
+    })();
+  }, [fetchLogs]);
 
   return (
     <div className="space-y-6 pb-24 font-sans" id="logs_screen">
@@ -165,7 +167,6 @@ export default function Logs() {
             {logs.map((log) => {
               const isFilled = log.status === "Filled";
               const isFailed = log.status === "Failed";
-              const isPending = log.status === "Pending";
 
               return (
                 <div

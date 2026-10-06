@@ -13,6 +13,7 @@ from typing import List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models import (
     Profile, RiskSettings, PaperBalance, UserCredential, TradeMode,
 )
@@ -53,7 +54,10 @@ async def collect_prerequisites(
     from app.models import Position
     try:
         pos_result = await db.execute(
-            select(Position).where(Position.profile_id == profile.id)
+            select(Position).where(
+                Position.profile_id == profile.id,
+                Position.is_closed.is_(False),
+            )
         )
         open_positions = pos_result.scalars().all()
     except Exception:
@@ -61,22 +65,48 @@ async def collect_prerequisites(
     if len(open_positions) >= max_concurrent:
         reasons.append(f"Max concurrent trades ({max_concurrent}) reached")
 
+    # ---- Circuit breaker (paper + live): blocks new orders while `open`. ----
+    # Disabling happens only via env or manual resume — the breaker never
+    # self-clears, so a blown strategy cannot keep trading after the dip.
+    try:
+        from app.services import circuit_breaker
+        allowed, breaker_reason = await circuit_breaker.can_trade()
+        if not allowed:
+            reasons.append(breaker_reason)
+    except Exception as exc:  # pragma: no cover — breaker is defence-in-depth
+        logger.warning("Circuit breaker check failed: %s", exc)
+
     # ---- Paper mode prerequisites (paper balance > 0) ----
     if mode == TradeMode.PAPER.value:
         try:
-            pb_result = await db.execute(
-                select(PaperBalance).where(PaperBalance.profile_id == profile.id)
-            )
-            pb = pb_result.scalar_one_or_none()
+            from sqlalchemy import func
+            total = (await db.execute(
+                select(func.coalesce(func.sum(PaperBalance.balance), 0))
+                .where(PaperBalance.profile_id == profile.id)
+            )).scalar()
         except Exception:
-            pb = None
-        balance = float(pb.balance) if (pb and pb.balance is not None) else 0.0
+            total = 0
+        balance = float(total or 0)
         if balance <= 0:
             reasons.append("Paper balance is 0 — set a paper trading balance in Settings")
         return reasons
 
     # ---- Live mode prerequisites ----
     if mode == TradeMode.LIVE.value:
+        settings = get_settings()
+        if not settings.LIVE_TRADING_ENABLED:
+            reasons.append("Live trading master switch is off (set LIVE_TRADING_ENABLED=true)")
+        if settings.REQUIRE_PROMOTION_FOR_LIVE:
+            try:
+                from app.services import promotion
+                if not await promotion.is_promoted(profile.id):
+                    reasons.append(
+                        "Model not promoted to live — promotion gate has not "
+                        "certified this profile (see /api/model/promotion)"
+                    )
+            except Exception as exc:
+                logger.warning("Promotion check failed: %s", exc)
+                reasons.append("Promotion status could not be verified")
         if not profile.bot_enabled:
             reasons.append("Live trading is not enabled (toggle the agent ON)")
         if rs is not None and not rs.spot_margin_enabled:

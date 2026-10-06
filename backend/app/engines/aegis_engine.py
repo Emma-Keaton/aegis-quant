@@ -19,6 +19,7 @@ from enum import Enum
 
 import pandas as pd
 import numpy as np
+import ccxt
 
 from app.config import get_settings
 from app.database import AsyncSessionLocal
@@ -31,6 +32,23 @@ from app.services.kronos_service import KronosService
 from app.services.source_registry import get_all_sources, SourceType
 
 logger = logging.getLogger(__name__)
+
+
+def _kronos_candles_from_frame(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Convert an OHLCV frame into the Kronos wire format.
+
+    Market data is this engine's responsibility; Kronos only predicts. Keeping
+    the conversion in one place means every call site sends identical candles.
+    """
+    rows = df.to_dict("records")
+    stamps: Optional[List[str]] = None
+    if "timestamps" in df.columns:
+        stamps = [ts.isoformat() for ts in df["timestamps"]]
+    elif "timestamp" in df.columns:
+        stamps = [str(value) for value in df["timestamp"]]
+    elif isinstance(df.index, pd.DatetimeIndex):
+        stamps = [ts.isoformat() for ts in df.index]
+    return KronosService.candles_from_rows(rows, stamps)
 settings = get_settings()
 
 # ── Response Models ──────────────────────────────────────────────────
@@ -432,15 +450,48 @@ class AegisEngine:
             return None
         
         # 2. Get Kronos forecast
+        # Real OHLCV is sent, not just closes: this service owns market data and
+        # Kronos only predicts. This previously passed `df['close'].tolist()`,
+        # which forced the service to synthesise high/low/volume server-side.
         try:
-            closes = df['close'].tolist()
-            forecast = await self.kronos.forecast(closes, horizon=24, samples=10)
-            trend = forecast.mean_path[-1] if forecast.mean_path else closes[-1]
-        except:
-            trend = closes[-1]
+            candles = _kronos_candles_from_frame(df)
+            forecast = await self.kronos.forecast(
+                candles,
+                horizon=24,
+                samples=10,
+                symbol=symbol,
+                interval_seconds=3600,
+            )
+            trend = forecast.mean_path[-1] if forecast.mean_path else float(df["close"].iloc[-1])
+
+            # A degenerate forecast (flat or near-flat input) carries no
+            # information. Feeding it into the ensemble would let numerical noise
+            # contribute to `confidence` and reach an execution threshold. Note
+            # the trend above is still used for context, but the forecast is not
+            # treated as evidence.
+            kronos_degenerate = forecast.is_degenerate
+            if kronos_degenerate:
+                logger.info(
+                    "Kronos forecast for %s is degenerate (%s); excluding from ensemble",
+                    symbol,
+                    forecast.metadata.get("model_source", "unknown"),
+                )
+        except Exception as exc:
+            logger.warning("Kronos forecast failed for %s: %s", symbol, exc)
+            trend = float(df["close"].iloc[-1])
+            # Failed forecast == no evidence, same as a degenerate one.
+            kronos_degenerate = True
         
         # 3. Run technical analysis
         technical_report = await self.technical.analyze(symbol, df)
+
+        # Kronos contributes to confidence only when it produced a usable distribution.
+        # A degenerate or failed forecast must not manufacture confidence, so the
+        # abstention is recorded on the report for auditability.
+        if kronos_degenerate:
+            technical_report.reasoning = (
+                f"{technical_report.reasoning} [kronos: degenerate forecast excluded]"
+            )
         
         # 4. Run sentiment analysis (from social signals)
         sentiment_report = await self.sentiment.analyze(symbol, [])
@@ -583,14 +634,15 @@ class AegisEngine:
             import uuid
             
             # Update position
+            price = float(getattr(decision, "current_price", 0) or 0)
             position = Position(
                 profile_id=profile.id,
                 symbol=decision.symbol,
                 exchange='paper',
                 side=OrderSide.BUY if decision.action == Action.BUY else OrderSide.SELL,
                 size=decision.position_size,
-                entry_price=0,  # Would get from market
-                current_price=0,
+                entry_price=price,
+                current_price=price,
                 mode=profile.trading_mode,
             )
             db.add(position)
@@ -603,7 +655,7 @@ class AegisEngine:
                 side=OrderSide.BUY if decision.action == Action.BUY else OrderSide.SELL,
                 execution_type=ExecutionType.PAPER,
                 size=decision.position_size,
-                price=0,
+                price=price,
                 total_value_usd=decision.position_size,
                 status=OrderStatus.FILLED,
             )
@@ -611,6 +663,21 @@ class AegisEngine:
             
             await db.commit()
             logger.info(f"Paper trade executed: {decision.action.value} {decision.symbol}")
+
+            # Announce the fill. Fire-and-forget so Telegram can never delay or
+            # roll back the execution above.
+            if profile.telegram_id:
+                from app.services.notifier import notify_trade_soon
+
+                notify_trade_soon(
+                    profile.telegram_id,
+                    symbol=decision.symbol,
+                    side=decision.action.value,
+                    amount=decision.position_size,
+                    price=0,
+                    mode=profile.trading_mode.value,
+                    confidence=int(decision.confidence),
+                )
     
     async def _analyze_solana_tokens(self, profile: Profile):
         """Analyze and trade Solana chain tokens via Jupiter."""

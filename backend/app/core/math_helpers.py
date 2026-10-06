@@ -87,54 +87,24 @@ def calculate_pnl(
         return (entry_price - current_price) * size
 
 
-def calculate_sharpe(returns: list, risk_free_rate: float = 0.02) -> float:
-    """Calculate Sharpe ratio from returns series"""
-    if len(returns) < 2:
-        return 0.0
-    
-    mean_return = sum(returns) / len(returns)
-    std_return = math.sqrt(sum((r - mean_return) ** 2 for r in returns) / (len(returns) - 1))
-    
-    if std_return == 0:
-        return 0.0
-    
-    return (mean_return - risk_free_rate / 252) / std_return * math.sqrt(252)
+def calculate_sharpe(returns: list, risk_free_rate: float = 0.02,
+                     interval_seconds: int = 3600) -> float:
+    """Annualized Sharpe ratio. Crypto is 24/7 — pass the bar interval."""
+    from app.core.statistics import sharpe_ratio
+    return sharpe_ratio(returns, risk_free_rate, interval_seconds)
 
 
 def calculate_max_drawdown(equity_curve: list) -> float:
     """Calculate maximum drawdown from equity curve"""
-    if not equity_curve:
-        return 0.0
-    
-    peak = equity_curve[0]
-    max_dd = 0.0
-    
-    for value in equity_curve:
-        if value > peak:
-            peak = value
-        dd = (peak - value) / peak
-        max_dd = max(max_dd, dd)
-    
-    return max_dd
+    from app.core.statistics import max_drawdown
+    return max_drawdown(equity_curve)
 
 
-def calculate_sortino(returns: list, risk_free_rate: float = 0.02) -> float:
-    """Calculate Sortino ratio (downside deviation only)"""
-    if len(returns) < 2:
-        return 0.0
-    
-    mean_return = sum(returns) / len(returns)
-    downside_returns = [r for r in returns if r < 0]
-    
-    if not downside_returns:
-        return float('inf') if mean_return > 0 else 0.0
-    
-    downside_std = math.sqrt(sum(r ** 2 for r in downside_returns) / len(downside_returns))
-    
-    if downside_std == 0:
-        return 0.0
-    
-    return (mean_return - risk_free_rate / 252) / downside_std * math.sqrt(252)
+def calculate_sortino(returns: list, risk_free_rate: float = 0.02,
+                      interval_seconds: int = 3600) -> float:
+    """Annualized Sortino ratio (downside deviation over the full sample)."""
+    from app.core.statistics import sortino_ratio
+    return sortino_ratio(returns, risk_free_rate, interval_seconds)
 
 
 def atr(high: list, low: list, close: list, period: int = 14) -> float:

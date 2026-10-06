@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react';
+import type { Config } from 'wagmi';
 import { WagmiProvider } from 'wagmi';
 import { RainbowKitProvider } from '@rainbow-me/rainbowkit';
 
 interface WalletLayerProps {
-  config: any;
+  config: Config;
   children: ReactNode;
 }
 

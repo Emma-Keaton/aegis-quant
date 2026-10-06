@@ -22,6 +22,7 @@ import httpx
 from feedparser import parse as parse_rss
 
 from app.config import get_settings
+from sqlalchemy import select
 from app.database import AsyncSessionLocal
 from app.models import Profile, Signal, UserWhitelist
 from app.services.source_registry import get_all_sources, SourceType
@@ -312,6 +313,7 @@ class EngineB:
         # Telegram/CoinGecko) when scanning at fast cadence.
         self._cooldown: Dict[str, float] = {}
         self._cooldown_seconds = settings.ENGINE_B_SCRAPE_COOLDOWN_SECONDS
+        self.active_users: Dict[int, Profile] = {}
 
     def _cooldown_ready(self, source_type: str) -> bool:
         """True if enough time has passed since the last fetch of this source."""
@@ -320,7 +322,6 @@ class EngineB:
             self._cooldown[source_type] = now
             return True
         return False
-        self.active_users: Dict[int, Profile] = {}
 
     async def initialize(self):
         """Load active users and connect scrapers."""
@@ -355,7 +356,18 @@ class EngineB:
 
         logger.info("Engine B: Social scan complete")
 
-    async def _scan_user_universe(self, profile: Profile, sources: List):
+    async def scan_profile(self, profile: Profile) -> List[Signal]:
+        """Public entry point: scan configured sources for one profile.
+
+        Ensures scrapers are initialised, then scans only that profile's
+        universe and returns the signals that were persisted.
+        """
+        if not self.active_users:
+            await self.initialize()
+        sources = get_all_sources()
+        return await self._scan_user_universe(profile, sources)
+
+    async def _scan_user_universe(self, profile: Profile, sources: List) -> List[Signal]:
         """Scan all sources for a user's universe."""
         # Get watchlist
         async with AsyncSessionLocal() as db:
@@ -382,17 +394,21 @@ class EngineB:
 
         # Rank and process
         ranked = self._rank_signals(all_signals)
-        
+
+        stored: List[Signal] = []
         for signal in ranked[:10]:  # Top 10
             if abs(signal.sentiment) >= 0.2:  # Minimum sentiment threshold
-                await self._process_signal(profile, signal)
+                row = await self._process_signal(profile, signal)
+                if row is not None:
+                    stored.append(row)
+        return stored
 
     def _rank_signals(self, signals: List[SocialSignal]) -> List[SocialSignal]:
         """Rank by sentiment strength."""
         return sorted(signals, key=lambda s: abs(s.sentiment), reverse=True)
 
-    async def _process_signal(self, profile: Profile, signal: SocialSignal):
-        """Store signal if above threshold."""
+    async def _process_signal(self, profile: Profile, signal: SocialSignal) -> Optional[Signal]:
+        """Store signal if above threshold. Returns the persisted row."""
         async with AsyncSessionLocal() as db:
             sig = Signal(
                 engine="B",
@@ -410,6 +426,7 @@ class EngineB:
             db.add(sig)
             await db.commit()
         logger.info(f"Engine B: Signal for {signal.ticker} from {signal.source}")
+        return sig
 
     def _detect_category(self, ticker: str) -> str:
         if ticker in ['BTC', 'ETH']: return 'Major'

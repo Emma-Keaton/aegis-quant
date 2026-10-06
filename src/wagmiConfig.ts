@@ -35,10 +35,9 @@ async function fetchAppConfig(): Promise<AppConfig> {
 }
 
 const APP_NAME = 'Aegis Quant';
-const APP_URL_FALLBACK = 'https://aegis-quant.vercel.app';
 
 /** Build wagmi connectors — includes exchange wallets via WalletConnect + injected */
-function buildConnectors(projectId: string | null, frontendUrl: string) {
+function buildConnectors(projectId: string | null) {
   if (!projectId) {
     // No projectId — only injected wallets (MetaMask etc.)
     return [injected()];
@@ -76,7 +75,6 @@ function buildConnectors(projectId: string | null, frontendUrl: string) {
 /** Create wagmi config — call after fetching app config. */
 export function buildWagmiConfig(appConfig: AppConfig) {
   const projectId = appConfig.walletConnect?.projectId;
-  const frontendUrl = appConfig.frontendUrl ?? APP_URL_FALLBACK;
 
   return createConfig({
     chains: [mainnet, bsc, polygon],
@@ -85,7 +83,7 @@ export function buildWagmiConfig(appConfig: AppConfig) {
       [bsc.id]: http(),
       [polygon.id]: http(),
     },
-    connectors: buildConnectors(projectId, frontendUrl),
+    connectors: buildConnectors(projectId),
   });
 }
 

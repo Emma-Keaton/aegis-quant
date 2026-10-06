@@ -85,8 +85,8 @@ async def execute_parsed_signal(profile_id, parsed: dict, source: str = "copy-tr
         fill_price = float(result.price) if result and result.price else float(price or 0)
 
         # Persist a Signal so it shows on Intel (convergence + agent-actions).
+        # NOTE: `signals` has no profile_id column — it is a global feed.
         sig = Signal(
-            profile_id=profile.id,
             engine="B",
             ticker=f"${symbol}",
             category="social",
@@ -134,6 +134,23 @@ async def execute_parsed_signal(profile_id, parsed: dict, source: str = "copy-tr
             side, size, symbol, source, profile.trading_mode.value,
             result.order_id if result else "n/a",
         )
+
+        # Announce the fill on Telegram — fire-and-forget, never on the hot path.
+        if profile.telegram_id:
+            from app.services.notifier import notify_trade_soon
+            executed = bool(result and result.executed)
+            notify_trade_soon(
+                profile.telegram_id,
+                symbol=f"{symbol}/USDT",
+                side=side,
+                amount=size,
+                price=fill_price,
+                mode=profile.trading_mode.value,
+                confidence=confidence,
+                tx_hash=result.order_id if result else None,
+                error=None if executed else "Venue did not confirm the order",
+            )
+
         return {
             "executed": bool(result and result.executed),
             "symbol": symbol,

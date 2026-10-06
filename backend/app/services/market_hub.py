@@ -65,7 +65,7 @@ async def start_market_feed(
     * ``interval`` – seconds between fetches (use a small value in tests).
     * ``exchange_name`` – name of a CCXT exchange that supports ``fetch_ticker``.
     """
-    global _tracked_symbols
+    global _tracked_symbols, _reconcile_task
     if symbols is None:
         from app.services.watchlist import get_watchlist_usc
         symbols = await get_watchlist_usc()

@@ -64,6 +64,9 @@ async def init_db() -> None:
             "ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS spot_margin_enabled BOOLEAN NOT NULL DEFAULT TRUE"
         ))
         await conn.execute(__import__('sqlalchemy').text(
+            "ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS base_trade_usd NUMERIC(5, 2) NOT NULL DEFAULT 10.0"
+        ))
+        await conn.execute(__import__('sqlalchemy').text(
             "ALTER TABLE copytrade_subscriptions ADD COLUMN IF NOT EXISTS parser_llm VARCHAR(20)"
         ))
         await conn.execute(__import__('sqlalchemy').text(
@@ -77,6 +80,21 @@ async def init_db() -> None:
         ))
         await conn.execute(__import__('sqlalchemy').text(
             "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS ton_mnemonic_enc TEXT"
+        ))
+        # Realised PnL on a closing trade. Without these a closed trade left no
+        # record of what it made, so equity could only be reconstructed from
+        # unrealised marks on still-open positions.
+        await conn.execute(__import__('sqlalchemy').text(
+            "ALTER TABLE trade_logs ADD COLUMN IF NOT EXISTS realized_pnl NUMERIC(20, 8)"
+        ))
+        await conn.execute(__import__('sqlalchemy').text(
+            "ALTER TABLE trade_logs ADD COLUMN IF NOT EXISTS entry_price NUMERIC(20, 8)"
+        ))
+        await conn.execute(__import__('sqlalchemy').text(
+            "ALTER TABLE trade_logs ADD COLUMN IF NOT EXISTS exit_price NUMERIC(20, 8)"
+        ))
+        await conn.execute(__import__('sqlalchemy').text(
+            "ALTER TABLE trade_logs ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ"
         ))
         print("[DB] Tables created/verified successfully")
 

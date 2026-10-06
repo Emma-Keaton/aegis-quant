@@ -58,7 +58,7 @@ function resolveUrl(url: string): string {
   return API_BASE ? `${API_BASE}${url}` : url;
 }
 
-export async function apiFetch(url: string, options: FetchOptions = {}): Promise<Response> {
+export function apiFetch(url: string, options: FetchOptions = {}): Promise<Response> {
   const { requireAuth = true, useInitData = true, headers: extraHeaders = {}, ...rest } = options;
 
   const headers: Record<string, string> = {
@@ -87,7 +87,7 @@ export async function apiFetch(url: string, options: FetchOptions = {}): Promise
 }
 
 // JSON helper — returns parsed JSON or throws
-export async function apiJson<T = any>(url: string, options: FetchOptions = {}): Promise<T> {
+export async function apiJson<T = unknown>(url: string, options: FetchOptions = {}): Promise<T> {
   const res = await apiFetch(url, options);
   if (!res.ok) {
     const body = await res.text();

@@ -25,12 +25,20 @@ from app.config import get_settings
 from app.database import AsyncSessionLocal
 from app.models import Profile, UserWhitelist, Position, TradeLog, Signal, ExecutionAudit
 from app.core.encryption import decrypt_credentials
-from app.services.kronos_service import get_kronos_client
+from app.services.kronos_service import get_kronos_client, get_kronos_service
+from app.services.forecasting import ForecastResult
 from app.engines.risk_validator import RiskValidator
 from app.engines.execution_router import ExecutionRouter
 from app.core.exceptions import EngineError, ExchangeError, InsufficientFundsError, RiskLimitExceededError
 
 logger = logging.getLogger(__name__)
+
+# Bar resolution for the Kronos horizon model. The fetch timeframe and the
+# interval reported to Kronos must describe the same bar; otherwise Kronos
+# derives calendar features from timestamps that do not match the spacing it was
+# told about, silently distorting time-of-day features.
+BAR_TIMEFRAME = "1m"
+BAR_INTERVAL_SECONDS = 60
 
 
 @dataclass
@@ -175,7 +183,7 @@ class EngineA:
     def __init__(self):
         self.settings = get_settings()
         self.ws_manager = CCXTWebSocketManager()
-        self.kronos = get_kronos_client()
+        self.kronos = get_kronos_service()
         self.risk_validator = RiskValidator()
         self.execution_router = ExecutionRouter()
         self.active_symbols: Dict[str, Dict] = {}  # user_id -> {symbol: config}
@@ -286,29 +294,70 @@ class EngineA:
         """Fetch candles, call Kronos, validate risk, execute"""
         try:
             # 1. Fetch latest candles (128 for Kronos)
-            candles = await self._fetch_candles(event.exchange, event.symbol, "1m", 128)
+            # `BAR_TIMEFRAME` is the single source of truth for both the bar
+            # request and the interval reported to Kronos. These previously
+            # disagreed: candles were always fetched at "1m" but the interval was
+            # reported as 3600 for non-price triggers. Kronos derives calendar
+            # features from the timestamps, so a wrong interval silently
+            # distorted them.
+            candles = await self._fetch_candles(
+                event.exchange, event.symbol, BAR_TIMEFRAME, 128
+            )
             if len(candles) < 64:
                 logger.warning(f"Insufficient candles for {event.symbol}: {len(candles)}")
                 return
-            
+
             # 2. Call Kronos for forecast
-            closes = [c["close"] for c in candles]
-            forecast = await self.kronos.forecast(closes=closes, horizon=30, samples=30)
-            if not forecast:
+            # Full OHLCV is sent: this engine owns market data, Kronos only
+            # predicts. `samples=10` rather than 30 gives a usable 90% envelope
+            # at a third of the cost; a single sample is not a distribution.
+            forecast = await self.kronos.forecast(
+                candles,
+                horizon=30,
+                samples=10,
+                symbol=event.symbol,
+                interval_seconds=BAR_INTERVAL_SECONDS,
+            )
+            if not forecast or not forecast.mean_path:
                 return
-            
+
+            # A degenerate forecast carries no information. Trading on its
+            # `confidence` would be trading on numerical noise.
+            if forecast.is_degenerate:
+                logger.info(
+                    "Skipping %s: degenerate Kronos forecast (%s)",
+                    event.symbol,
+                    forecast.metadata.get("model_source"),
+                )
+                return
+
             confidence = forecast.confidence
             min_conf = float(profile.engine_a_min_confidence or 0.70) * 100
+            # Learned threshold overrides the configured one once the learner
+            # has validated; until then `effective_params` returns configured.
+            try:
+                from app.database import AsyncSessionLocal
+                from app.services.kronos_ledger_store import LedgerStore
+                async with AsyncSessionLocal() as store_db:
+                    params, _state = await LedgerStore(store_db).effective_params(
+                        configured_threshold=int(round(min_conf)),
+                        configured_band_tolerance=0.10,
+                        configured_sample_penalty=0.0,
+                    )
+                min_conf = float(params.get("confidence_threshold", min_conf))
+            except Exception as exc:
+                logger.warning("Learned threshold unavailable, using configured: %s", exc)
             if confidence < min_conf:
                 logger.info(f"Confidence {confidence} below threshold {min_conf}")
                 return
             
-            # 3. Risk validation
+# 3. Risk validation — pass candles so SL/TP are ATR-adaptive.
             risk_check = await self.risk_validator.validate(
                 profile=profile,
                 symbol=event.symbol,
                 signal_confidence=confidence,
-                current_price=event.current_price
+                current_price=event.current_price,
+                candles=candles,
             )
             
             if not risk_check.approved:
@@ -332,9 +381,60 @@ class EngineA:
             
             # 5. Log execution audit
             await self._log_execution_audit(profile, event, forecast, execution)
-            
+
+            # 6. Notify. Fire-and-forget: a Telegram outage must never delay or
+            #    roll back an execution, so this cannot await onto the trade path.
+            self._notify_execution(profile, event, forecast, execution)
+
         except Exception as e:
             logger.error(f"Signal processing error: {e}")
+
+    def _notify_execution(
+        self,
+        profile: Profile,
+        event: TriggerEvent,
+        forecast: ForecastResult,
+        execution: dict,
+    ) -> None:
+        """Announce a filled or failed order to the user's Telegram.
+
+        Fire-and-forget on purpose: a Telegram outage must never delay or roll
+        back an execution.
+        """
+        from app.services.notifier import notify_trade_soon
+
+        if not profile.telegram_id:
+            return
+        side = getattr(execution, "side", None) or (
+            execution.get("side") if isinstance(execution, dict) else None
+        ) or "buy"
+        amount = (
+            getattr(execution, "amount", None)
+            or (execution.get("amount") if isinstance(execution, dict) else None)
+            or 0
+        )
+        price = (
+            getattr(execution, "price", None)
+            or (execution.get("price") if isinstance(execution, dict) else None)
+            or event.current_price
+        )
+        error = getattr(execution, "error", None) or (
+            execution.get("error") if isinstance(execution, dict) else None
+        )
+        tx_hash = getattr(execution, "tx_hash", None) or (
+            execution.get("tx_hash") if isinstance(execution, dict) else None
+        )
+        notify_trade_soon(
+            profile.telegram_id,
+            symbol=event.symbol,
+            side=str(getattr(side, "value", side)),
+            amount=float(amount or 0),
+            price=float(price or 0),
+            mode=profile.trading_mode.value,
+            confidence=forecast.confidence,
+            tx_hash=tx_hash,
+            error=error,
+        )
     
     async def _fetch_candles(self, exchange_id: str, symbol: str, timeframe: str, limit: int) -> List:
         """Fetch OHLCV candles"""
@@ -383,6 +483,32 @@ class EngineA:
             db.add(audit)
             await db.commit()
     
+    async def _resolve_scan_price(self, exchange_id: str, symbol: str) -> float:
+        """Best available price for a scheduled scan: shared ticker cache first,
+        then a direct one-shot exchange fetch. Returns 0.0 when unavailable."""
+        from app.services.market_hub import get_market_data
+
+        ticker = get_market_data(symbol)
+        price = float((ticker or {}).get("last") or 0)
+        if price > 0:
+            return price
+
+        exchange_class = getattr(ccxt, exchange_id, None)
+        if exchange_class is None:
+            return 0.0
+        exchange = exchange_class({'enableRateLimit': True})
+        try:
+            ticker = await exchange.fetch_ticker(symbol)
+            return float((ticker or {}).get("last") or 0)
+        except Exception as e:
+            logger.warning(f"Price fetch failed for {symbol} on {exchange_id}: {e}")
+            return 0.0
+        finally:
+            try:
+                await exchange.close()
+            except Exception:
+                pass
+
     async def scheduled_scan(self):
         """Fallback: Full scan every 5 minutes"""
         logger.info("Engine A: Running scheduled full scan")
@@ -393,13 +519,22 @@ class EngineA:
             for whitelist_item in profile.whitelist:
                 if not whitelist_item.active:
                     continue
+
+                # Resolve the real price — a synthetic 0 would reach the risk
+                # validator and divide by zero during position sizing.
+                price = await self._resolve_scan_price(
+                    whitelist_item.exchange, whitelist_item.symbol
+                )
+                if price <= 0:
+                    logger.info(f"Scheduled scan: no price for {whitelist_item.symbol}, skipping")
+                    continue
                 
                 # Create synthetic trigger for scheduled scan
                 event = TriggerEvent(
                     symbol=whitelist_item.symbol,
                     exchange=whitelist_item.exchange,
                     trigger_type="scheduled",
-                    current_price=0,  # Will be fetched
+                    current_price=price,
                     change_pct=0,
                     volume_ratio=0,
                     spread_bps=0,

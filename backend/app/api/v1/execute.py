@@ -210,11 +210,36 @@ async def close_position(
     
     if not position:
         raise HTTPException(status_code=404, detail="Position not found")
-    
-    # Record metrics
-    record_trade(position.symbol, "sell", position.exchange)
-    
-    await db.delete(position)
-    await db.commit()
-    
-    return {"message": f"Position {position_id} closed"}
+
+    if position.is_closed:
+        return {"message": f"Position {position_id} already closed"}
+
+    # Route the close through the router (paper cash / live venue) instead of
+    # deleting the row: a deleted position leaves no realised PnL, no TradeLog,
+    # and nothing for the promotion gate or circuit breaker to learn from.
+    from app.engines.execution_router import ExecutionRouter
+    from app.services.position_manager import close_with_router
+
+    router = ExecutionRouter()
+    try:
+        try:
+            pnl = await close_with_router(
+                db, profile, position, router=router,
+                exit_price_hint=float(position.current_price or 0),
+            )
+        finally:
+            await router.close_all()
+        await db.commit()
+    except Exception as e:
+        record_error()
+        raise HTTPException(status_code=502, detail=f"Close failed: {e}")
+
+    record_pnl(pnl)
+
+    try:
+        from app.services import circuit_breaker
+        await circuit_breaker.record_outcome(pnl)
+    except Exception:
+        pass
+
+    return {"message": f"Position {position_id} closed", "realized_pnl": pnl}

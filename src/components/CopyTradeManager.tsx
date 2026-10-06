@@ -20,60 +20,75 @@ export default function CopyTradeManager() {
       const res = await apiFetch('/api/copytrade/channels');
       const json = await res.json();
       if (json.status === 'success') setChannels(json.data);
-      else throw new Error(json.error || 'Failed');
-    } catch (e: any) {
-      setError(e.message);
+      else throw new Error(json.error || json.detail || 'Failed');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchChannels();
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await apiFetch('/api/copytrade/channels');
+        const json: unknown = await res.json();
+        if (!alive) return;
+        const payload = json as { status?: string; data?: Channel[]; error?: string };
+        if (payload.status === 'success' && payload.data) setChannels(payload.data);
+        else setError(payload.error || 'Failed');
+      } catch (e) {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const handleAdd = async () => {
     if (!newChannelId) return;
     try {
-      const res = await apiFetch('/api/copytrade/register', {
+      const res = await apiFetch('/api/copytrade/channels/register', {
         method: 'POST',
-        body: JSON.stringify({ channelId: newChannelId, confidenceThreshold: newThreshold, parserLlm: 'groq' }),
+        body: JSON.stringify({ channelId: newChannelId, confidenceThreshold: newThreshold, parserLLM: 'groq' }),
       });
       const json = await res.json();
-      if (json.status !== 'success') throw new Error(json.error || 'Add failed');
+      if (json.status !== 'success') throw new Error(json.error || json.detail || 'Add failed');
       setNewChannelId('');
       setNewThreshold(80);
       await fetchChannels();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
   const handleUpdate = async (channelId: string, threshold: number) => {
     try {
-      const res = await apiFetch('/api/copytrade/update', {
+      const res = await apiFetch('/api/copytrade/channels/update', {
         method: 'PATCH',
         body: JSON.stringify({ channelId, confidenceThreshold: threshold }),
       });
       const json = await res.json();
-      if (json.status !== 'success') throw new Error(json.error || 'Update failed');
+      if (json.status !== 'success') throw new Error(json.error || json.detail || 'Update failed');
       await fetchChannels();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
   const handleDelete = async (channelId: string) => {
     try {
-      const res = await apiFetch('/api/copytrade/unregister', {
+      const res = await apiFetch('/api/copytrade/channels/unregister', {
         method: 'DELETE',
         body: JSON.stringify({ channelId }),
       });
       const json = await res.json();
-      if (json.status !== 'success') throw new Error(json.error || 'Delete failed');
+      if (json.status !== 'success') throw new Error(json.error || json.detail || 'Delete failed');
       await fetchChannels();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 

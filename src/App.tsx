@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { UserState, RiskSettings } from "./types";
+import type { UserState, RiskSettings, BacktestResult } from "./types";
 import Dashboard from "./components/Dashboard";
 import Wallet from "./components/Wallet";
 import Strategy from "./components/Strategy";
@@ -34,10 +34,27 @@ const DEFAULT_USER_STATE: UserState = {
   onboardingPages: []
 };
 
+interface StateApiResponse {
+  data?: Partial<UserState>;
+  userState?: Partial<UserState>;
+}
+
+interface RiskProfileApiResponse {
+  data?: RiskSettings;
+}
+
+interface ExchangeRateApiResponse {
+  nairaRate?: number;
+}
+
+interface ResetSettingsApiResponse {
+  status?: string;
+  data?: RiskSettings;
+}
+
 export default function App({ walletReady = true }: { walletReady?: boolean }) {
   const [currentTab, setCurrentTab] = useState<"home" | "wallet" | "strategy" | "intel" | "logs" | "admin">("home");
   const [loading, setLoading] = useState<boolean>(true);
-  const [stateError, setStateError] = useState<string | null>(null);
 
   // App core state — initialized empty, populated from API
   const [userState, setUserState] = useState<UserState>({ ...DEFAULT_USER_STATE });
@@ -56,12 +73,7 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
   const [forceTokensTour, setForceTokensTour] = useState(false);
 
   // Backtest result overlay state
-  const [backtestResult, setBacktestResult] = useState<{
-    backtestCurve: any[];
-    benchmarkCurve: any[];
-    metrics: any;
-    active: boolean;
-  } | null>(null);
+  const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
 
   // Network Offline connection loss simulation state
   const [networkOffline, setNetworkOffline] = useState<boolean>(false);
@@ -124,10 +136,10 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
   const fetchState = async () => {
     try {
       const [stateRes, riskRes] = await Promise.all([
-        apiJson<any>("/api/state"),
-        apiJson<any>("/api/risk-profile")
+        apiJson<StateApiResponse>("/api/state"),
+        apiJson<RiskProfileApiResponse>("/api/risk-profile")
       ]);
-      
+
       if (stateRes.data || stateRes.userState) {
         const uState = stateRes.data || stateRes.userState;
         setUserState(prev => ({ ...prev, ...uState }));
@@ -137,7 +149,6 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
       }
     } catch (err) {
       console.error("[State] Could not load user state:", err);
-      setStateError("Failed to load state");
     } finally {
       setLoading(false);
     }
@@ -151,11 +162,11 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
   // frontend in sync whenever the cached rate is updated.
   const refreshNairaRate = async () => {
     try {
-      const json = await apiJson<any>("/api/exchange-rate");
+      const json = await apiJson<ExchangeRateApiResponse>("/api/exchange-rate");
       if (json && typeof json.nairaRate === "number") {
         setUserState(prev => ({ ...prev, nairaRate: json.nairaRate }));
       }
-    } catch (err) {
+    } catch {
       // Poll failed — keep the last known rate (server returns its cache on
       // retry). Nothing to update here.
     }
@@ -195,20 +206,28 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
     };
 
     checkConnectivity();
-    window.addEventListener("online", () => checkConnectivity());
-    window.addEventListener("offline", () => setNetworkOffline(true));
+    const handleOnline = () => {
+      void checkConnectivity();
+    };
+    const handleOffline = () => {
+      setNetworkOffline(true);
+    };
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
     const interval = setInterval(checkConnectivity, 5000);
 
     return () => {
-      window.removeEventListener("online", () => checkConnectivity());
-      window.removeEventListener("offline", () => setNetworkOffline(true));
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
       clearInterval(interval);
     };
   }, []);
 
   useEffect(() => {
     if (!networkOffline) {
-      fetchState();
+      void (async () => {
+        await fetchState();
+      })();
     }
   }, [networkOffline]);
 
@@ -218,7 +237,9 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
   // The interval only runs while online; when offline we keep the last known rate.
   useEffect(() => {
     if (networkOffline) return;
-    refreshNairaRate();
+    void (async () => {
+      await refreshNairaRate();
+    })();
     const id = setInterval(refreshNairaRate, 15 * 60 * 1000); // every 15 minutes
     return () => clearInterval(id);
   }, [networkOffline]);
@@ -238,15 +259,21 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
 
   useEffect(() => {
     let mounted = true;
-    initSession().then(authenticated => {
-      if (mounted) {
-        setLoading(true); // reset loading for real fetch
-        fetchState();
-      }
-    }).catch(() => {
-      if (mounted) setLoading(false);
-    });
-    return () => { mounted = false; };
+    initSession()
+      .then(() => {
+        if (mounted) {
+          setLoading(true); // reset loading for real fetch
+          fetchState();
+        }
+        return undefined;
+      })
+      .catch(() => {
+        if (mounted) setLoading(false);
+        return undefined;
+      });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   // ── Handlers ──────────────────────────────────────────────────
@@ -277,18 +304,21 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
   };
 
   const handleToggleTradeMode = async (mode: "PAPER" | "LIVE") => {
+    const previous = userState.tradeMode;
     setUserState(prev => ({ ...prev, tradeMode: mode }));
     try {
       await apiJson("/api/toggle-mode", { method: "POST", body: JSON.stringify({ mode }) });
     } catch (err) {
       console.error("Mode toggle failed", err);
+      // Revert — never leave the UI claiming LIVE when the backend stayed PAPER.
+      setUserState(prev => ({ ...prev, tradeMode: previous }));
     }
   };
 
   const handleToggleCurrency = async (currency: "USD" | "NGN") => {
     setUserState(prev => ({ ...prev, currency }));
     try {
-      const json = await apiJson<any>("/api/toggle-currency", {
+      const json = await apiJson<ExchangeRateApiResponse>("/api/toggle-currency", {
         method: "POST", body: JSON.stringify({ currency })
       });
       setUserState(prev => ({ ...prev, nairaRate: json.nairaRate || prev.nairaRate }));
@@ -308,7 +338,7 @@ export default function App({ walletReady = true }: { walletReady?: boolean }) {
 
   const handleResetSettings = async () => {
     try {
-      const json = await apiJson<any>("/api/reset-settings", { method: "POST" });
+      const json = await apiJson<ResetSettingsApiResponse>("/api/reset-settings", { method: "POST" });
       if (json.status === "success" && json.data) {
         setRiskSettings(json.data);
       }

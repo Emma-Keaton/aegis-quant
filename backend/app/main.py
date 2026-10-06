@@ -271,6 +271,14 @@ def create_app() -> FastAPI:
     from app.api.v1.metrics import router as metrics_router
     app.include_router(metrics_router)
 
+    # Position execution + open-position management
+    from app.api.v1.execute import router as execute_router
+    app.include_router(execute_router)
+
+    # Market watch + model ops (token-watch, scoreboard, promotion, breaker)
+    from app.api.v1.market_watch import router as market_watch_router
+    app.include_router(market_watch_router)
+
     # WebSocket
     # Prometheus metrics
     from app.metrics import get_metrics_endpoint, initialize

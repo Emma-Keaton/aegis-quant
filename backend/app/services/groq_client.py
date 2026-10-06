@@ -30,10 +30,13 @@ class GroqClient:
         return self._client
 
     async def analyze_text(self, text: str, ticker: str) -> Dict:
+        from app.services.quant_reference import compact_block
         prompt = f"""Analyze this crypto news/social text for trading signals.
 
 Ticker: {ticker}
 Text: {text[:500]}
+
+{compact_block()}
 
 Output JSON with:
 - sentiment: float between -1 and 1
@@ -70,10 +73,12 @@ Only output valid JSON, no markdown."""
 
     async def extract_signal(self, text: str, max_len: int = 600) -> Dict:
         """Decode a raw channel message into a structured trade signal."""
+        from app.services.quant_reference import compact_block
         prompt = (
             "You are a trading signal parser. Decode the following crypto "
             "channel message into a structured signal.\n\n"
             f"Message: {text[:max_len]}\n\n"
+            f"{compact_block()}\n\n"
             'Output JSON only with keys:\n'
             '- ticker: the coin symbol (e.g. "SOL"), or null\n'
             '- action: "BUY" | "SELL" | "HOLD"\n'
@@ -124,7 +129,7 @@ def get_groq_client() -> GroqClient:
     settings = get_settings()
     
     if _groq_client is None and settings.GROQ_API_KEY:
-        model = getattr(settings, 'GROQ_MODEL', 'llama-3.1-70b-versatile')
+        model = getattr(settings, 'GROQ_MODEL', 'qwen/qwen3.8-27b')
         _groq_client = GroqClient(settings.GROQ_API_KEY, model)
     elif _groq_client is None:
         logger.warning("GROQ_API_KEY not set — skipping Groq analysis")

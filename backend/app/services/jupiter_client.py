@@ -13,11 +13,17 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Jupiter API endpoints
-JUPITER_QUOTE_URL = "https://quote-api.jup.ag/v6/quote"
-JUPITER_SWAP_URL = "https://quote-api.jup.ag/v6/swap"
-JUPITER_PRICE_URL = "https://price.jup.ag/v4/price"
+# Jupiter API endpoints.
+#
+# The legacy `quote-api.jup.ag`, `price.jup.ag` and `tokens.jup.ag` hosts were
+# retired (they no longer resolve in DNS). Jupiter's public replacements live on
+# `lite-api.jup.ag`; `datapi.jup.ag` serves asset metadata for symbol -> mint
+# resolution. Verified against the live API before switching.
+JUPITER_QUOTE_URL = "https://lite-api.jup.ag/swap/v1/quote"
+JUPITER_SWAP_URL = "https://lite-api.jup.ag/swap/v1/swap"
+JUPITER_PRICE_URL = "https://lite-api.jup.ag/price/v3"
 JUPITER_TOKEN_LIST_URL = "https://tokens.jup.ag/tokens?tags=verified"
+JUPITER_ASSET_SEARCH_URL = "https://datapi.jup.ag/v1/assets/search"
 
 # Solana token addresses
 SOL_MINT = "So11111111111111111111111111111111111111112"
@@ -74,14 +80,16 @@ class JupiterClient:
     """Client for Jupiter v6 API."""
 
     def __init__(self, wsol_amount: float = 0.1):
-        self.base_url = "https://quote-api.jup.ag/v6"
+        self.base_url = "https://lite-api.jup.ag"
         self.http_client = httpx.AsyncClient(
-            base_url="https://quote-api.jup.ag",
+            base_url="https://lite-api.jup.ag",
             timeout=30.0,
             headers={"Content-Type": "application/json"}
         )
         # Default WSOL amount for USD pricing
         self._wsol_amount = wsol_amount
+        # symbol -> mint cache (assets rarely change; avoids a call per trade)
+        self._mint_cache: Dict[str, str] = {}
 
     async def close(self):
         """Close HTTP client."""
@@ -107,17 +115,20 @@ class JupiterClient:
             }
 
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get("/v6/quote", params=params)
+                resp = await client.get(JUPITER_QUOTE_URL, params=params)
                 resp.raise_for_status()
                 data = resp.json()
 
             return SwapQuote(
                 input_mint=data.get("inputMint", input_mint),
                 output_mint=data.get("outputMint", output_mint),
-                input_amount=int(data.get("inputAmount", amount)),
-                output_amount=int(data.get("outputAmount", 0)),
-                price_pure=float(data.get("pricePure", 0)),
-                price_impact_pct=float(data.get("priceImpactPct", 0)),
+            # lite-api (swap/v1) returns `inAmount`/`outAmount`; the retired v6
+            # payload used `inputAmount`/`outputAmount`. Accept both so sizing
+            # never silently collapses to 0.
+            input_amount=int(data.get("inAmount", data.get("inputAmount", amount))),
+            output_amount=int(data.get("outAmount", data.get("outputAmount", 0))),
+            price_pure=float(data.get("pricePure") or 0.0),
+            price_impact_pct=float(data.get("priceImpactPct") or 0.0),
                 route_plan=data.get("routePlan", []),
                 context_slot=int(data.get("contextSlot", 0)),
             )
@@ -146,7 +157,7 @@ class JupiterClient:
                 payload["prioritizationFeeLamports"] = prioritizationFeeLamports
 
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post("/v6/swap", json=payload)
+                resp = await client.post(JUPITER_SWAP_URL, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
 
@@ -159,23 +170,33 @@ class JupiterClient:
             return None
 
     async def get_price(self, token_mint: str) -> Optional[TokenPrice]:
-        """Get price for a token in USD."""
+        """Get price for a token in USD (Jupiter price v3, with v4 fallback)."""
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get("/v4/price", params={"ids": token_mint})
+                resp = await client.get(JUPITER_PRICE_URL, params={"ids": token_mint})
                 resp.raise_for_status()
                 data = resp.json()
 
-            if "data" in data and token_mint in data["data"]:
-                price_data = data["data"][token_mint]
-                return TokenPrice(
-                    mint=token_mint,
-                    price=float(price_data.get("price", 0)),
-                    id=token_mint,
-                    symbol=price_data.get("symbol"),
-                    confidence=float(price_data.get("conf", 1.0)),
-                )
-            return None
+            # v3: {"<mint>": {"usdPrice": ...}}; legacy v4: {"data": {"<mint>": {"price": ...}}}
+            entry = None
+            if isinstance(data, dict):
+                if isinstance(data.get(token_mint), dict):
+                    entry = data[token_mint]
+                elif isinstance(data.get("data"), dict) and isinstance(data["data"].get(token_mint), dict):
+                    entry = data["data"][token_mint]
+            if entry is None:
+                return None
+
+            raw_price = entry.get("usdPrice", entry.get("price", 0)) or 0
+            if float(raw_price) <= 0:
+                return None
+            return TokenPrice(
+                mint=token_mint,
+                price=float(raw_price),
+                id=token_mint,
+                symbol=entry.get("symbol"),
+                confidence=float(entry.get("conf", 1.0)),
+            )
         except Exception as e:
             logger.error(f"Jupiter price fetch error for {token_mint}: {e}")
             return None
@@ -193,7 +214,7 @@ class JupiterClient:
         """Get list of verified tokens from Jupiter."""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get("/tokens/tokens", params={"tags": "verified"})
+                resp = await client.get(JUPITER_TOKEN_LIST_URL)
                 resp.raise_for_status()
                 data = resp.json()
 
@@ -203,13 +224,53 @@ class JupiterClient:
             return []
 
     async def get_token_by_symbol(self, symbol: str) -> Optional[str]:
-        """Get token mint address by symbol."""
-        tokens = await self.get_verified_tokens()
-        symbol_upper = symbol.upper()
-        for token in tokens:
-            if token.get("symbol", "").upper() == symbol_upper:
-                return token.get("address")
-        return None
+        """Resolve a token symbol to its Solana mint address.
+
+        Uses Jupiter's asset search (`datapi.jup.ag`), which ranks by relevance
+        and marks audited assets with `isVerified`. Verified + exact-symbol hits
+        are preferred so lookalike memecoins cannot hijack a trade.
+        """
+        want = symbol.lstrip("$").upper()
+        if not want:
+            return None
+
+        cached = self._mint_cache.get(want)
+        if cached:
+            return cached
+
+        # Canonical mints that never need a lookup.
+        static = {"SOL": SOL_MINT, "WSOL": SOL_MINT, "USDC": USDC_MINT, "USDT": USDT_MINT}
+        if want in static:
+            self._mint_cache[want] = static[want]
+            return static[want]
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(JUPITER_ASSET_SEARCH_URL, params={"query": want})
+                resp.raise_for_status()
+                assets = resp.json()
+        except Exception as e:
+            logger.error(f"Jupiter asset search failed for {symbol}: {e}")
+            return None
+
+        if not isinstance(assets, list) or not assets:
+            logger.warning(f"No Jupiter asset found for {symbol}")
+            return None
+
+        def norm(a: Dict) -> str:
+            return str(a.get("symbol") or "").lstrip("$").upper()
+
+        verified_exact = [a for a in assets if norm(a) == want and a.get("isVerified")]
+        exact = [a for a in assets if norm(a) == want]
+        verified = [a for a in assets if a.get("isVerified")]
+        chosen = (verified_exact or exact or verified or assets)[0]
+
+        mint = chosen.get("id")
+        if not mint:
+            return None
+        logger.info(f"Resolved {symbol} -> {mint} ({chosen.get('symbol')})")
+        self._mint_cache[want] = mint
+        return mint
 
 
 # Global instance

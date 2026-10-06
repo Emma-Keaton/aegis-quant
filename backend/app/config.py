@@ -63,20 +63,31 @@ class Settings(BaseSettings):
     ADMIN_CHAT_ID: Optional[int] = None
     TELEGRAM_WEBHOOK_SECRET: str = ""
 
-    # AI Services
+    # Kronos prediction service. The model runs on Modal; this backend owns
+    # market data, calibration and execution. There is deliberately no hardcoded
+    # default host: a stale onrender URL previously sat here and silently pointed
+    # at a service that was never running Kronos.
     KRONOS_SERVICE_URL: str = ""
-    KRONOS_API_URL: str = "https://kronos-ai.onrender.com"
+    KRONOS_API_KEY: str = ""
+    KRONOS_SAMPLES: int = 10
+    KRONOS_TIMEOUT: float = 90.0
+
+    # Alias kept for existing call sites. Empty unless set, so a missing
+    # KRONOS_SERVICE_URL is visible as "unconfigured" rather than masked by a
+    # default that resolves to a dead host.
+    KRONOS_API_URL: str = ""
     
     GEMINI_API_KEY_1: str = ""
     GEMINI_API_KEY_2: str = ""
     GEMINI_API_KEY_3: str = ""
-    
-    GROQ_API_KEY: str = ""
+
     GEMINI_MODEL: str = "gemini-2.5-flash"
 
-    # Groq / LLM
+    # Groq / LLM. `qwen/qwen3.8-27b` is the model verified to support
+    # `response_format=json_object` on the current Groq API; the previously
+    # defaulted `llama-3.x` IDs now return HTTP 404.
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL: str = "qwen/qwen3.8-27b"
 
     # Market data sources (CoinMarketCap requires a key; Raydium is public read)
     CMC_API_KEY: str = ""
@@ -167,6 +178,48 @@ class Settings(BaseSettings):
     # Copy-trade channel polling cadence + toggle.
     COPYTRADE_SCAN_ENABLED: bool = True
     COPYTRADE_SCAN_SECONDS: int = 30
+
+    # ── Market watchers (dex snapshots + whale flows) ──────────────────────
+    DEX_WATCH_ENABLED: bool = True
+    DEX_WATCH_INTERVAL_SECONDS: int = 60
+    DEX_MIN_LIQUIDITY_USD: float = 20_000
+    DEX_WATCH_CHAINS: str = "solana"
+    # Spike ping: |1h change| at or above this, with liquidity floor, notifies.
+    DEX_SPIKE_PCT_1H: float = 8.0
+    DEX_SPIKE_MIN_LIQUIDITY_USD: float = 50_000
+    DEX_SPIKE_COOLDOWN_SECONDS: int = 1800
+    # Z-score threshold vs per-token 1h-change history (dexwatch z-scores).
+    DEX_SPIKE_ZSCORE_MIN: float = 3.0
+
+    WHALE_WATCH_ENABLED: bool = True
+    WHALE_WATCH_INTERVAL_SECONDS: int = 600
+    # Empty key disables whale collection entirely (logged once, not per tick).
+    HELIUS_API_KEY: str = ""
+    MIN_WHALE_USD: float = 50_000
+    # Optional override: SYMBOL:mint pairs, comma separated (e.g. "BONK:<mint>").
+    WHALE_MINTS: str = ""
+
+    # ── Circuit breaker ────────────────────────────────────────────────────
+    BREAKER_ENABLED: bool = True
+    BREAKER_MAX_DRAWDOWN_PCT: float = 15.0
+    BREAKER_MAX_CONSECUTIVE_LOSSES: int = 6
+    BREAKER_WARN_DRAWDOWN_PCT: float = 8.0
+    BREAKER_WARN_CONSECUTIVE_LOSSES: int = 3
+
+    # ── Paper → live promotion ─────────────────────────────────────────────
+    PROMOTION_ENABLED: bool = True
+    PROMOTION_INTERVAL_HOURS: int = 6
+    # Live orders additionally require a `promoted` decision when this is set.
+    REQUIRE_PROMOTION_FOR_LIVE: bool = True
+    # Live trading master switch (mirrors the reference's LIVE_TRADING_ENABLED).
+    LIVE_TRADING_ENABLED: bool = False
+    PROMOTION_MIN_TRADES: int = 30
+    PROMOTION_MIN_ACCURACY: float = 0.53
+    PROMOTION_MAX_BRIER: float = 0.25
+    PROMOTION_MIN_EXPECTANCY: float = 0.0
+    PROMOTION_MIN_DEFALTED_SHARPE: float = 0.95
+    PROMOTION_MIN_TRACK_DAYS: int = 3
+
 
     # WalletConnect / Reown
     WALLET_CONNECT_PROJECT_ID: str = ""

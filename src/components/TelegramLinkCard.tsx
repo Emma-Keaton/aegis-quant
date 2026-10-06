@@ -24,7 +24,24 @@ export default function TelegramLinkCard() {
       setStatus({ linked: false, status: "unknown" });
     }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const r = await apiFetch("/api/telegram/link/status");
+        const j: unknown = await r.json();
+        if (alive) {
+          const s = j as { linked?: boolean; status?: string; phone?: string };
+          setStatus({ linked: !!s.linked, status: s.status ?? "unknown", phone: s.phone });
+        }
+      } catch {
+        if (alive) setStatus({ linked: false, status: "unknown" });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const sendCode = async () => {
     setBusy(true); setError(null); setOk(null);
@@ -34,7 +51,7 @@ export default function TelegramLinkCard() {
       })).json();
       if (j.status === "success" || j.ok) { setStep("code"); setOk("Verification code sent to your Telegram."); }
       else setError(j.error || "Failed to send code");
-    } catch (e: any) { setError(String(e?.message || e)); } finally { setBusy(false); }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
 
   const verify = async () => {
@@ -45,7 +62,7 @@ export default function TelegramLinkCard() {
       })).json();
       if (j.status === "success" || j.ok) { setOk("Telegram account linked ✓"); setStep("idle"); setCode(""); setPassword(""); await load(); }
       else setError(j.error === "2fa_required" ? "2FA enabled — enter your password below." : (j.error || "Verification failed"));
-    } catch (e: any) { setError(String(e?.message || e)); } finally { setBusy(false); }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
 
   const logout = async () => {

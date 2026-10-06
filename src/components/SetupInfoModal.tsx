@@ -19,18 +19,22 @@ export default function SetupInfoModal({ onClose }: SetupInfoModalProps) {
   // Lazy-load the how-to instructions from the backend /api/wallet/setup-info.
   if (!loaded) {
     setLoaded(true);
-    fetch(
-      `${import.meta.env.VITE_API_URL?.replace(/\/$/, "") || ""}/api/wallet/setup-info`,
-      { cache: "no-store" },
-    )
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => {
-        if (j?.methods) {
-          setMethods(j.methods);
-          setSelected(j.methods[0]?.method || "Solana (keypair)");
+    void (async () => {
+      try {
+        const res = await fetch(
+          `${import.meta.env.VITE_API_URL?.replace(/\/$/, "") || ""}/api/wallet/setup-info`,
+          { cache: "no-store" },
+        );
+        const j: unknown = res.ok ? await res.json() : null;
+        const methods = (j as { methods?: Method[] } | null)?.methods;
+        if (methods) {
+          setMethods(methods);
+          setSelected(methods[0]?.method || "Solana (keypair)");
         }
-      })
-      .catch(() => {});
+      } catch {
+        // Setup info is optional UI — leave the loading copy in place.
+      }
+    })();
   }
 
   const current = methods.find((m) => m.method === selected);

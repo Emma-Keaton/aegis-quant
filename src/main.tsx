@@ -20,7 +20,7 @@ const WAGMI_TIMEOUT_MS = 3000;
 
 function Root() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
-  const [config, setConfig] = useState<any>(null);
+  const [config, setConfig] = useState<Awaited<ReturnType<typeof initWagmi>> | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -29,16 +29,18 @@ function Root() {
       setStatus((s) => (s === 'loading' ? 'failed' : s));
     }, WAGMI_TIMEOUT_MS);
 
-    initWagmi()
-      .then((cfg) => {
+    void (async () => {
+      try {
+        const cfg = await initWagmi();
         if (!alive) return;
         setConfig(cfg);
         setStatus('ready');
-      })
-      .catch(() => {
+      } catch {
         if (alive) setStatus('failed');
-      })
-      .finally(() => clearTimeout(timer));
+      } finally {
+        clearTimeout(timer);
+      }
+    })();
 
     return () => {
       alive = false;

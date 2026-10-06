@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Sliders, ShieldCheck, CheckSquare, Square, AlertOctagon, HelpCircle, Trash2, Plus, DollarSign, Coins, Play, RefreshCw, BarChart2, Bell, Zap, Sparkles } from "lucide-react";
-import { RiskSettings, AlertRule } from "../types";
+import { Sliders, AlertOctagon, Trash2, Plus, Coins, Play, RefreshCw, BarChart2 } from "lucide-react";
+import type { RiskSettings, AlertRule, BacktestResult, BacktestMetrics, BacktestCurvePoint } from "../types";
 import apiFetch from "../api/client";
 import StrategyPlaybook from "./StrategyPlaybook";
 
@@ -14,13 +14,8 @@ interface StrategyProps {
   currency: "USD" | "NGN";
   nairaRate: number | null;
   onToggleCurrency: (currency: "USD" | "NGN") => void;
-  backtestResult?: {
-    backtestCurve: any[];
-    benchmarkCurve: any[];
-    metrics: any;
-    active: boolean;
-  } | null;
-  onUpdateBacktest: (result: any) => void;
+  backtestResult?: BacktestResult | null;
+  onUpdateBacktest: (result: BacktestResult | null) => void;
   balance: number;
   onUpdateBalance: (balance: number) => void;
   networkOffline: boolean;
@@ -108,7 +103,7 @@ export default function Strategy({
   const [customBench, setCustomBench] = useState<string>("vs_sol");
   const [backtestLoading, setBacktestLoading] = useState<boolean>(false);
   const [backtestProgress, setBacktestProgress] = useState<number>(0);
-  const [backtestMetrics, setBacktestMetrics] = useState<any>(
+  const [backtestMetrics, setBacktestMetrics] = useState<BacktestMetrics | null>(
     backtestResult?.active ? backtestResult.metrics : null
   );
 
@@ -160,7 +155,7 @@ export default function Strategy({
     const finalBench = backtestBench === "CUSTOM" ? customBench : backtestBench;
 
     try {
-      const res = await apiFetch("/api/backtest", {
+      const res = await apiFetch("/api/backtest/legacy", {
         method: "POST",
         body: JSON.stringify({
           range: finalRange,
@@ -170,16 +165,21 @@ export default function Strategy({
       });
       
       if (res.ok) {
-        const json = await res.json();
+        const json = (await res.json()) as {
+          status?: string;
+          metrics?: BacktestMetrics;
+          backtestCurve?: BacktestCurvePoint[];
+          benchmarkCurve?: BacktestCurvePoint[];
+        };
         // Wait till progress bar finishes
         setTimeout(() => {
           setBacktestLoading(false);
           if (json.status === "success") {
-            setBacktestMetrics(json.metrics);
+            setBacktestMetrics(json.metrics ?? null);
             onUpdateBacktest({
-              backtestCurve: json.backtestCurve,
-              benchmarkCurve: json.benchmarkCurve,
-              metrics: json.metrics,
+              backtestCurve: json.backtestCurve ?? [],
+              benchmarkCurve: json.benchmarkCurve ?? [],
+              metrics: json.metrics ?? null,
               active: true
             });
           }

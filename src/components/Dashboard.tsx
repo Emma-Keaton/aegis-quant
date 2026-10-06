@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { Settings, TrendingUp, Sparkles, AlertTriangle, ArrowUpRight, ArrowDownRight, ChevronDown, Award, Wifi, WifiOff } from "lucide-react";
-import { UserState } from "../types";
+import { Settings, TrendingUp, ChevronDown, Award, Wifi, WifiOff } from "lucide-react";
+import type { UserState, BacktestResult } from "../types";
 import { PnLChart } from "./PnLChart";
 
 interface DashboardProps {
@@ -9,15 +9,14 @@ interface DashboardProps {
   onNavigateToStrategy: () => void;
   onNavigateToLogs: () => void;
   onPanic: () => void;
-  backtestResult?: any;
+  backtestResult?: BacktestResult;
   networkOffline: boolean;
   onToggleNetworkOffline: (offline: boolean) => void;
 }
 
 
 
-export default function Dashboard({ userState, onToggleAgent, onNavigateToStrategy, onNavigateToLogs, onPanic, backtestResult, networkOffline, onToggleNetworkOffline }: DashboardProps) {
-  const [timeframe, setTimeframe] = useState<string>("1D");
+export default function Dashboard({ userState, onToggleAgent, onNavigateToStrategy, onNavigateToLogs, onPanic, backtestResult, networkOffline }: DashboardProps) {
   const [showAnalytics, setShowAnalytics] = useState<boolean>(false);
   const [selectedAsset, setSelectedAsset] = useState<string>("SOL");
   const [panicState, setPanicState] = useState<"idle" | "armed" | "terminating">("idle");

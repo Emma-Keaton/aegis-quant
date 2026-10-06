@@ -1,11 +1,13 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import CopyTradeManager from "./CopyTradeManager";
 import {
-  RefreshCw, Radio, Sparkles, MessageSquare, Flame, Plus, Trash2,
-  CheckCircle, XCircle, Link2, Activity, Zap,
+  RefreshCw, Radio, Sparkles, MessageSquare, Flame, Trash2,
+  Link2, Activity, Zap, Trophy, ShieldCheck, Droplets, BarChart3,
 } from "lucide-react";
-import { MarketSignal } from "../types";
+import type {
+  MarketSignal, ScoreboardResponse, TokenWatchResponse, PromotionResponse,
+} from "../types";
 import { apiFetch, apiJson } from "../api/client";
 import TelegramLinkCard from "./TelegramLinkCard";
 
@@ -72,6 +74,53 @@ export default function Intel({ agentActedTickers, networkOffline }: IntelProps)
     },
   });
 
+  // Model scoreboard — ledger-derived model quality + breaker state.
+  const { data: scoreboardData } = useQuery<ScoreboardResponse>({
+    queryKey: ["scoreboard"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/model/scoreboard");
+      if (!res.ok) throw new Error("Scoreboard unavailable");
+      return res.json() as Promise<ScoreboardResponse>;
+    },
+    refetchInterval: 60000,
+    retry: false,
+  });
+
+  // Token watch — DEX snapshots, spikes, whale flows.
+  const { data: watchData } = useQuery<TokenWatchResponse>({
+    queryKey: ["tokenWatch"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/token-watch?limit=30");
+      if (!res.ok) throw new Error("Watch unavailable");
+      return res.json() as Promise<TokenWatchResponse>;
+    },
+    refetchInterval: 90000,
+    retry: false,
+  });
+
+  // Promotion readiness — live-trading gate checklist.
+  const { data: promotionData } = useQuery<PromotionResponse>({
+    queryKey: ["promotion"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/model/promotion");
+      if (!res.ok) throw new Error("Promotion status unavailable");
+      return res.json() as Promise<PromotionResponse>;
+    },
+    refetchInterval: 120000,
+    retry: false,
+  });
+
+  const breakerState = (watchData?.breaker?.state ?? scoreboardData?.breaker?.state ?? "closed") as string;
+  const breakerColor =
+    breakerState === "open" ? "text-red-400 border-red-500/40 bg-red-500/10"
+    : breakerState === "warning" ? "text-amber-400 border-amber-500/40 bg-amber-500/10"
+    : "text-[#c6ff34] border-[#c6ff34]/30 bg-[#c6ff34]/10";
+
+  const fmtPct = (v: number | null | undefined) =>
+    v === null || v === undefined ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+  const fmtUsd = (v: number | null | undefined) =>
+    v === null || v === undefined ? "—" : `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
   // Sync engine B + Groq to generate new signals
   const syncMutation = useMutation({
     mutationFn: async () => {
@@ -91,7 +140,7 @@ export default function Intel({ agentActedTickers, networkOffline }: IntelProps)
   const handleRescan = () => {
     setSyncing(true);
     syncMutation.mutateAsync()
-      .catch((err: any) => console.error("Sync failed:", err))
+      .catch((err: unknown) => console.error("Sync failed:", err))
       .finally(() => setSyncing(false));
   };
 
@@ -136,7 +185,7 @@ export default function Intel({ agentActedTickers, networkOffline }: IntelProps)
     }
   };
 
-  // ── Trending tokens (separate bucket from the watchlist) ────────────────
+  // -- Trending tokens (separate bucket from the watchlist) ----------------
   interface TrendingItem {
     ticker: string;
     symbol: string;
@@ -222,6 +271,182 @@ export default function Intel({ agentActedTickers, networkOffline }: IntelProps)
           <p className="text-[10px] font-mono text-zinc-500 truncate">
             {sources.length} sources - {signals.length} parsed signals - Binance + CoinGecko + Coinbase + CoinLore
           </p>
+        </div>
+      </div>
+
+      {/* Model Scoreboard + Promotion Readiness + Watch & Spikes (quant ops) */}
+      <div className="space-y-4" id="quant_ops">
+        {/* Scoreboard */}
+        <div className="space-y-3">
+          <div className="flex justify-between items-center px-1">
+            <p className="text-xs uppercase tracking-wider text-zinc-400 font-bold flex items-center gap-1.5">
+              <Trophy className="w-3.5 h-3.5 text-[#c6ff34]" /> MODEL SCOREBOARD
+            </p>
+            <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded border ${breakerColor}`}>
+              BREAKER {breakerState.toUpperCase()}
+            </span>
+          </div>
+          <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4 space-y-3">
+            {scoreboardData?.forecast_models?.length ? (
+              <div className="overflow-x-auto no-scrollbar">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-[8px] uppercase tracking-widest text-zinc-500">
+                      <th className="pb-2 pr-2 font-bold">#</th>
+                      <th className="pb-2 pr-2 font-bold">Model</th>
+                      <th className="pb-2 pr-2 font-bold">Settled</th>
+                      <th className="pb-2 pr-2 font-bold">Hit</th>
+                      <th className="pb-2 pr-2 font-bold">Brier</th>
+                      <th className="pb-2 pr-2 font-bold">AUC</th>
+                      <th className="pb-2 font-bold">IC</th>
+                    </tr>
+                  </thead>
+                  <tbody className="font-mono text-[11px]">
+                    {scoreboardData.forecast_models.slice(0, 8).map((m) => (
+                      <tr key={m.model} className="border-t border-zinc-800/60">
+                        <td className="py-1.5 pr-2 text-zinc-500">{m.rank}</td>
+                        <td className="py-1.5 pr-2 text-white font-bold truncate max-w-[110px]">{m.model}</td>
+                        <td className="py-1.5 pr-2 text-zinc-400">{m.settled}</td>
+                        <td className="py-1.5 pr-2 text-[#c6ff34] font-bold">
+                          {m.hit_rate === null ? "—" : `${(m.hit_rate * 100).toFixed(1)}%`}
+                        </td>
+                        <td className="py-1.5 pr-2 text-zinc-400">{m.brier ?? "—"}</td>
+                        <td className="py-1.5 pr-2 text-zinc-400">{m.roc_auc ?? "—"}</td>
+                        <td className={`py-1.5 font-bold ${m.spearman_ic !== null && m.spearman_ic > 0.05 ? "text-[#c6ff34]" : "text-zinc-500"}`}>
+                          {m.spearman_ic ?? "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-xs text-zinc-500 text-center py-4">No scored forecasts yet — the board fills as the ledger settles.</p>
+            )}
+            {scoreboardData?.paper && (
+              <div className="grid grid-cols-4 gap-2 border-t border-zinc-800/60 pt-3">
+                {[
+                  { label: "Open", value: String(scoreboardData.paper.open_positions) },
+                  { label: "Settled", value: String(scoreboardData.paper.settled_trades) },
+                  { label: "Paper WR", value: scoreboardData.paper.win_rate === null ? "—" : `${(scoreboardData.paper.win_rate * 100).toFixed(1)}%` },
+                  { label: "Equity", value: fmtUsd(scoreboardData.paper.equity_usd) },
+                ].map((cell) => (
+                  <div key={cell.label} className="bg-zinc-950 rounded-lg border border-zinc-800 px-2 py-2">
+                    <p className="text-[8px] uppercase tracking-widest text-zinc-500 font-bold">{cell.label}</p>
+                    <p className="text-xs font-mono font-bold text-white mt-0.5">{cell.value}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {scoreboardData?.latest_promotion && (
+              <p className="text-[9px] font-mono text-zinc-500 pt-1">
+                Latest promotion: <span className={scoreboardData.latest_promotion.status === "promoted" ? "text-[#c6ff34]" : "text-zinc-300"}>{scoreboardData.latest_promotion.status}</span>
+                {scoreboardData.latest_promotion.reason ? ` — ${scoreboardData.latest_promotion.reason}` : ""}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Promotion readiness checklist */}
+        <div className="space-y-3">
+          <p className="text-xs uppercase tracking-wider text-zinc-400 font-bold px-1 flex items-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-[#c6ff34]" /> LIVE READINESS
+          </p>
+          <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4 space-y-2">
+            {promotionData?.readiness?.length ? (
+              <>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-mono text-zinc-400">
+                    Mode: <span className="text-white font-bold uppercase">{promotionData.trading_mode}</span>
+                  </span>
+                  <span className="text-[10px] font-mono text-zinc-400">
+                    Decision: <span className={`font-bold ${promotionData.decision.status === "promoted" ? "text-[#c6ff34]" : "text-zinc-300"}`}>{promotionData.decision.status}</span>
+                  </span>
+                </div>
+                {promotionData.readiness.map((check) => (
+                  <div key={check.name} className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${check.passed ? "bg-[#c6ff34]" : "bg-red-500"}`}></span>
+                    <span className="text-[10px] font-bold text-white uppercase tracking-wider flex-1 min-w-0 truncate">{check.name}</span>
+                    <span className={`text-[9px] font-mono ${check.passed ? "text-[#c6ff34]" : "text-red-400"}`}>
+                      {check.passed ? "PASS" : "FAIL"}
+                    </span>
+                  </div>
+                ))}
+                {promotionData.decision.reason && (
+                  <p className="text-[9px] font-mono text-zinc-500 pt-1">{promotionData.decision.reason}</p>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-zinc-500 text-center py-4">Readiness checklist unavailable.</p>
+            )}
+          </div>
+        </div>
+
+        {/* Watch & spikes */}
+        <div className="space-y-3">
+          <p className="text-xs uppercase tracking-wider text-zinc-400 font-bold px-1 flex items-center gap-1.5">
+            <Droplets className="w-3.5 h-3.5 text-[#c6ff34]" /> WATCH & SPIKES
+          </p>
+          <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] font-mono text-zinc-500">
+                {watchData?.enabled ? `DEX watch ON · every ${watchData.interval_seconds}s` : "DEX watch OFF"}
+                {" · threshold "}{watchData ? `${watchData.spike_threshold_pct}%` : "—"}
+              </span>
+              <span className={`text-[9px] font-mono px-2 py-0.5 rounded border ${breakerColor}`}>
+                {breakerState.toUpperCase()}
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold flex items-center gap-1.5">
+                <BarChart3 className="w-3 h-3" /> Spike candidates
+              </p>
+              {watchData?.spikes?.length ? (
+                watchData.spikes.slice(0, 8).map((s, i) => (
+                  <div key={`${s.symbol}-${i}`} className="flex items-center justify-between gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white truncate">{s.symbol}</p>
+                      <p className="text-[9px] font-mono text-zinc-500 truncate">
+                        {s.chain} · liq {fmtUsd(s.liquidity_usd)} · price ${s.price_usd?.toFixed(4) ?? "—"}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className={`text-xs font-mono font-bold ${s.spike_pct >= 0 ? "text-[#c6ff34]" : "text-red-400"}`}>
+                        {fmtPct(s.spike_pct)}
+                      </p>
+                      {typeof s.z_score === "number" && (
+                        <p className="text-[9px] font-mono text-zinc-500">z {s.z_score.toFixed(1)}</p>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-zinc-500 text-center py-3">No spikes above threshold right now.</p>
+              )}
+            </div>
+            <div className="space-y-1.5 border-t border-zinc-800/60 pt-3">
+              <p className="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">
+                Whale flows{watchData?.whale_enabled ? "" : " (HELIUS key not set)"}
+              </p>
+              {watchData?.whale_flows?.length ? (
+                watchData.whale_flows.slice(0, 6).map((f, i) => (
+                  <div key={`${f.wallet}-${i}`} className="flex items-center justify-between gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white truncate">{f.symbol}</p>
+                      <p className="text-[9px] font-mono text-zinc-500 truncate">{f.wallet?.slice(0, 8)}…{f.wallet?.slice(-4)}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className={`text-[10px] font-mono font-bold ${f.side === "buy" ? "text-[#c6ff34]" : "text-red-400"}`}>
+                        {f.side.toUpperCase()} {fmtUsd(f.amount_usd)}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-zinc-500 text-center py-3">No whale flows in the last 2h.</p>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -460,7 +685,7 @@ export default function Intel({ agentActedTickers, networkOffline }: IntelProps)
         </div>
       </div>
 
-      {/* Trending tokens — separate bucket from the watchlist (CMC → CoinGecko → Raydium) */}
+      {/* Trending tokens — separate bucket from the watchlist (CMC ? CoinGecko ? Raydium) */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <p className="text-[10px] uppercase tracking-widest text-[#c6ff34] font-black flex items-center gap-1.5">
@@ -473,7 +698,7 @@ export default function Intel({ agentActedTickers, networkOffline }: IntelProps)
         <div className="bg-[#1c2023] border border-zinc-800 rounded-2xl overflow-hidden">
           {trending.length === 0 ? (
             <p className="text-xs text-zinc-500 text-center py-6 px-4">
-              Polling trending tokens (CoinMarketCap → CoinGecko → Raydium)... check back in a moment.
+              Polling trending tokens (CoinMarketCap ? CoinGecko ? Raydium)... check back in a moment.
             </p>
           ) : (
             <div className="divide-y divide-zinc-800">

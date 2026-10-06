@@ -25,21 +25,21 @@ class RiskCheckResult:
 
 class RiskValidator:
     """Validates trades against user risk settings and portfolio state"""
-    
-    def __init__(self):
-        self.kronos = KronosClient()
-    
+
     async def validate(
         self,
         profile: Profile,
         symbol: str,
         signal_confidence: int,
         current_price: float,
-        risk_settings: Optional[RiskSettings] = None
+        risk_settings: Optional[RiskSettings] = None,
+        candles: Optional[list] = None,
     ) -> RiskCheckResult:
         """
         Validate a potential trade against all risk parameters.
-        
+
+        `candles`: optional recent OHLCV list; when present, SL/TP are
+        ATR-based (adaptive to current vol) instead of fixed percentages.
         Returns RiskCheckResult with approved status and trade parameters.
         """
         # Get risk settings
@@ -66,14 +66,40 @@ class RiskValidator:
                 'whitelist_only': True
             })()
         
-        # 1. Check max concurrent trades
+        # 0. Reject unusable prices — a zero/absent price would divide by zero
+        # below and would otherwise send a zero-size order to the venue.
+        if not current_price or current_price <= 0:
+            return RiskCheckResult(
+                approved=False,
+                reason="Invalid current price",
+                side="buy",
+                size=0,
+                stop_loss=None,
+                take_profit=None
+            )
+
+        if risk_settings.stop_loss_pct <= 0:
+            return RiskCheckResult(
+                approved=False,
+                reason="stop_loss_pct must be greater than zero",
+                side="buy",
+                size=0,
+                stop_loss=None,
+                take_profit=None
+            )
+
+        # 1. Check max concurrent trades (open positions only — closed rows
+        # must never count against the cap).
         from app.database import AsyncSessionLocal
         from sqlalchemy import select
         from app.models import Position
-        
+
         async with AsyncSessionLocal() as db:
             pos_result = await db.execute(
-                select(Position).where(Position.profile_id == profile.id)
+                select(Position).where(
+                    Position.profile_id == profile.id,
+                    Position.is_closed.is_(False),
+                )
             )
             open_positions = pos_result.scalars().all()
         
@@ -143,6 +169,18 @@ class RiskValidator:
         side = "buy"  # Default to long for now
         stop_loss = current_price * (1 - risk_settings.stop_loss_pct / 100)
         take_profit = current_price * (1 + risk_settings.take_profit_pct / 100)
+        # ATR-adaptive levels when candles are available (Engine A enrichment).
+        if candles:
+            try:
+                import pandas as pd
+                from app.core.indicators import atr_levels
+                df = pd.DataFrame(candles)
+                atr_lvl = atr_levels(df, side=side)
+                if atr_lvl:
+                    stop_loss = float(atr_lvl["stop_loss"])
+                    take_profit = float(atr_lvl["take_profit"])
+            except Exception:
+                pass  # fall back to pct-based SL/TP
         
         # 5. Validate with comprehensive risk check
         risk_check = validate_trade_risk(
@@ -187,30 +225,39 @@ class RiskValidator:
         from sqlalchemy import select
         
         async with AsyncSessionLocal() as db:
-            pb_result = await db.execute(
-                select(PaperBalance).where(PaperBalance.profile_id == profile.id)
-            )
-            paper_bal = pb_result.scalar_one_or_none()
-            if paper_bal:
-                return float(paper_bal.balance)
+            from sqlalchemy import func
+            total = (await db.execute(
+                select(func.coalesce(func.sum(PaperBalance.balance), 0))
+                .where(PaperBalance.profile_id == profile.id)
+            )).scalar()
+            if total is not None:
+                return float(total)
         return 10000.0  # Default paper balance
     
     async def _get_current_drawdown(self, profile: Profile) -> float:
-        """Calculate current daily drawdown from trade logs"""
+        """Current daily drawdown as a percentage of available equity.
+
+        Measured as the sum of negative unrealized PnL on positions touched
+        today, divided by the account's available balance. Closed trade logs
+        carry no realized PnL column, so open-position losses are the only
+        faithful drawdown signal available here.
+        """
         from app.database import AsyncSessionLocal
-        from app.models import TradeLog, OrderStatus
+        from app.models import Position
         from sqlalchemy import select, func
         from datetime import datetime, timezone
-        
+
         async with AsyncSessionLocal() as db:
             today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             result = await db.execute(
-                select(func.coalesce(func.sum(TradeLog.total_value_usd), 0))
-                .where(TradeLog.profile_id == profile.id)
-                .where(TradeLog.executed_at >= today_start)
-                .where(TradeLog.side == OrderSide.SELL)
+                select(func.coalesce(func.sum(Position.unrealized_pnl), 0))
+                .where(Position.profile_id == profile.id)
+                .where(Position.is_closed.is_(False))
+                .where(Position.updated_at >= today_start)
             )
-            realized_losses = float(result.scalar() or 0)
-            if realized_losses <= 0:
-                return 0.0
-            return min(realized_losses / 10000.0 * 100, 100.0)
+            open_pnl = float(result.scalar() or 0)
+
+        if open_pnl >= 0:
+            return 0.0
+        equity = await self._get_balance(profile) or 10000.0
+        return min(abs(open_pnl) / equity * 100.0, 100.0)

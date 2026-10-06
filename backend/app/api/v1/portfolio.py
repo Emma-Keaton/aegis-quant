@@ -56,11 +56,11 @@ async def get_portfolio_history(
     # Build cumulative PnL curve
     # Start with paper balance as baseline
     from app.models import PaperBalance
-    paper_result = await db.execute(
-        select(PaperBalance).where(PaperBalance.profile_id == profile.id)
-    )
-    paper_bal = paper_result.scalar_one_or_none()
-    baseline = float(paper_bal.balance) if paper_bal else 0
+    from sqlalchemy import func as _pf
+    baseline = float((await db.execute(
+        select(_pf.coalesce(_pf.sum(PaperBalance.balance), 0))
+        .where(PaperBalance.profile_id == profile.id)
+    )).scalar() or 0)
     
     data = []
     cumulative = baseline
@@ -148,11 +148,11 @@ async def get_portfolio_stats(
     
     # Paper balance
     from app.models import PaperBalance
-    paper_result = await db.execute(
-        select(PaperBalance).where(PaperBalance.profile_id == profile.id)
-    )
-    paper_bal = paper_result.scalar_one_or_none()
-    balance = float(paper_bal.balance) if paper_bal else 0
+    from sqlalchemy import func as _pf2
+    balance = float((await db.execute(
+        select(_pf2.coalesce(_pf2.sum(PaperBalance.balance), 0))
+        .where(PaperBalance.profile_id == profile.id)
+    )).scalar() or 0)
     
     # Open positions
     from app.models import Position

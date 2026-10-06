@@ -2,11 +2,11 @@ import React, { useState, useEffect } from "react";
 import { connectEVM, connectEVMWallet } from "../crypto/evmConnector";
 import { connectSolana, connectSolanaWallet, signSolanaTransaction } from "../crypto/solanaConnector";
 import { WALLET_APPS, EVM_FAST_LINKS, SOLANA_FAST_LINKS } from "../crypto/walletLinks";
-import { Link, Wallet as WalletIcon, Shield, Check, ExternalLink, HelpCircle, Eye, Trash2 } from "lucide-react";
+import { Wallet as WalletIcon, Shield, Eye, Trash2 } from "lucide-react";
 import { useTonConnectUI } from "@tonconnect/ui-react";
 import WalletConnectUI from "./WalletConnectUI";
 import SetupInfoModal from "./SetupInfoModal";
-import { UserState } from "../types";
+import type { UserState } from "../types";
 import { apiFetch } from "../api/client";
 
 interface WalletProps {
@@ -41,39 +41,11 @@ export default function Wallet({
   const [liveSymbol, setLiveSymbol] = useState<string>("");
   const [spotMargin, setSpotMargin] = useState<boolean>(true);
 
-  // Load the Spot & Margin permission from the live risk settings.
-  useEffect(() => {
-    apiFetch("/api/risk")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (j && typeof j.spot_margin_enabled === "boolean") setSpotMargin(j.spot_margin_enabled); })
-      .catch(() => {});
-  }, []);
-
-  // Fetch the live balance whenever a wallet is connected.
-  useEffect(() => {
-    if (!userState.walletConnected || !userState.walletAddress) {
-      setLiveBalance(null); setLiveUsd(null); setLiveSymbol("");
-      return;
-    }
-    let cancelled = false;
-    const n = (userState.network || "").toLowerCase();
-    const net = userState.network === "TON"
-      ? "ton"
-      : n.includes("bsc") || n.includes("bnb") || n.includes("smart chain")
-        ? "bsc"
-        : n.includes("polygon") ? "polygon"
-          : n.includes("sol") ? "solana" : "evm";
-    apiFetch(`/api/wallet/balance?network=${net}&address=${encodeURIComponent(userState.walletAddress)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => {
-        if (!cancelled && j && j.status === "success") {
-          setLiveBalance(j.balance ?? null);
-          setLiveUsd(j.usdEstimate ?? null);
-          setLiveSymbol(j.symbol || "");
-        }
-      })
-      .catch(() => {});
-    // ?? Per-user Solana wallet-signed trade + autonomous key ?????
+  // Per-user Solana wallet-signed trade + autonomous key.
+  // These must be declared in the component body. They previously sat inside the
+  // balance-fetch useEffect below, which React rejects: hooks called during an
+  // effect are not part of the render's hook list, so hook ordering breaks and
+  // React throws "Rendered fewer hooks than expected".
   const [solTradeAmount, setSolTradeAmount] = useState<string>("");
   const [solTradeToken, setSolTradeToken] = useState<string>("BONK");
   const [solTradeBusy, setSolTradeBusy] = useState<boolean>(false);
@@ -84,12 +56,94 @@ export default function Wallet({
   const [showSetupInfo, setShowSetupInfo] = useState<boolean>(false);
   const [solKeyStatus, setSolKeyStatus] = useState<{ user_key_set: boolean; server_key_set: boolean; active_source: string } | null>(null);
 
+  // TON autonomous-wallet mnemonic. Declared in the component body; these hooks
+  // were previously spliced inside a .map() callback, which React rejects.
+  const [tonMnemonic, setTonMnemonic] = useState<string>("");
+  const [tonShowMnemonic, setTonShowMnemonic] = useState<boolean>(false);
+  const [tonMnemonicStatus, setTonMnemonicStatus] = useState<{ user_mnemonic_set: boolean; server_mnemonic_set: boolean; active_source: string } | null>(null);
+
+  // Load the Spot & Margin permission from the live risk settings.
   useEffect(() => {
-    apiFetch("/api/wallet/solana/key")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (j) setSolKeyStatus({ user_key_set: !!j.user_key_set, server_key_set: !!j.server_key_set, active_source: j.active_source }); })
-      .catch(() => {});
+    void (async () => {
+      const r = await apiFetch("/api/risk").catch(() => null);
+      const j = r && r.ok ? await r.json().catch(() => null) : null;
+      if (j && typeof j.spot_margin_enabled === "boolean") setSpotMargin(j.spot_margin_enabled);
+    })();
   }, []);
+
+  // Fetch the live balance whenever a wallet is connected.
+  useEffect(() => {
+    if (!userState.walletConnected || !userState.walletAddress) {
+      void Promise.resolve().then(() => {
+        setLiveBalance(null); setLiveUsd(null); setLiveSymbol("");
+        return undefined;
+      });
+      return;
+    }
+    let cancelled = false;
+    const n = (userState.network || "").toLowerCase();
+    const net = userState.network === "TON"
+      ? "ton"
+      : n.includes("bsc") || n.includes("bnb") || n.includes("smart chain")
+        ? "bsc"
+        : n.includes("polygon") ? "polygon"
+          : n.includes("sol") ? "solana" : "evm";
+    void (async () => {
+      const r = await apiFetch(`/api/wallet/balance?network=${net}&address=${encodeURIComponent(userState.walletAddress)}`).catch(() => null);
+      const j = r && r.ok ? await r.json().catch(() => null) : null;
+      if (!cancelled && j && j.status === "success") {
+        setLiveBalance(j.balance ?? null);
+        setLiveUsd(j.usdEstimate ?? null);
+        setLiveSymbol(j.symbol || "");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userState.walletConnected, userState.walletAddress, userState.network]);
+
+  useEffect(() => {
+    void (async () => {
+      const r = await apiFetch("/api/wallet/solana/key").catch(() => null);
+      const j = r && r.ok ? await r.json().catch(() => null) : null;
+      if (j) setSolKeyStatus({ user_key_set: !!j.user_key_set, server_key_set: !!j.server_key_set, active_source: j.active_source });
+    })();
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      const r = await apiFetch("/api/wallet/ton/mnemonic").catch(() => null);
+      const j = r && r.ok ? await r.json().catch(() => null) : null;
+      if (j) setTonMnemonicStatus({ user_mnemonic_set: !!j.user_mnemonic_set, server_mnemonic_set: !!j.server_mnemonic_set, active_source: j.active_source });
+    })();
+  }, []);
+
+  const handleSaveTonMnemonic = async () => {
+    try {
+      const res = await apiFetch("/api/wallet/ton/mnemonic", {
+        method: "POST",
+        body: JSON.stringify({ mnemonic: tonMnemonic }),
+      });
+      const j = await res.json();
+      if (res.ok) {
+        setTonMnemonic("");
+        setTonMnemonicStatus((p) => ({ ...(p || { server_mnemonic_set: false, active_source: "" }), user_mnemonic_set: true, active_source: "user" }));
+        setTonTradeMsg("TON mnemonic saved (AES-256 encrypted).");
+      } else {
+        setTonTradeErr(j.detail || "Failed to save mnemonic");
+      }
+    } catch (e) {
+      setTonTradeErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleDeleteTonMnemonic = async () => {
+    try {
+      await apiFetch("/api/wallet/ton/mnemonic", { method: "DELETE" });
+      setTonMnemonicStatus((p) => (p ? { ...p, user_mnemonic_set: false, active_source: p.server_mnemonic_set ? "server" : "none" } : p));
+      setTonTradeMsg("TON mnemonic removed.");
+    } catch (e) {
+      setTonTradeErr(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const handleSaveSolKey = async () => {
     try {
@@ -105,8 +159,8 @@ export default function Wallet({
       } else {
         setSolTradeErr(j.detail || "Failed to save key");
       }
-    } catch (e: any) {
-      setSolTradeErr(String(e?.message || e));
+    } catch (e) {
+      setSolTradeErr(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -115,8 +169,8 @@ export default function Wallet({
       await apiFetch("/api/wallet/solana/key", { method: "DELETE" });
       setSolKeyStatus((p) => (p ? { ...p, user_key_set: false, active_source: p.server_key_set ? "server" : "none" } : p));
       setSolTradeMsg("Solana private key removed.");
-    } catch (e: any) {
-      setSolTradeErr(String(e?.message || e));
+    } catch (e) {
+      setSolTradeErr(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -154,15 +208,12 @@ export default function Wallet({
         return;
       }
       setSolTradeMsg(`SOLANA ${token} SWAP confirmed ? ${confirmJson.tx_hash}`);
-    } catch (e: any) {
-      setSolTradeErr(e?.message ? String(e.message) : "Solana trade cancelled or failed");
+    } catch (e) {
+      setSolTradeErr(e instanceof Error ? e.message : "Solana trade cancelled or failed");
     } finally {
       setSolTradeBusy(false);
     }
   };
-
-  return () => { cancelled = true; };
-  }, [userState.walletConnected, userState.walletAddress, userState.network]);
 
   const toggleSpotMargin = async (val: boolean) => {
     setSpotMargin(val);
@@ -189,8 +240,8 @@ export default function Wallet({
 
   const handleTonConnect = async () => {
     try {
-      // Fast-link straight to the TonKeeper app (native deep link via TonConnect).
-      await tonConnectUI.connectWallet({ tonkeeper: [] });
+      // Open the TonConnect wallet-selection modal (TonKeeper is the default pick).
+      await tonConnectUI.connectWallet();
       // TonConnectUI handles the UI modal; after success we refresh state
       setConnectionSuccess(true);
     } catch (e) {
@@ -309,7 +360,7 @@ export default function Wallet({
       const broadcast = await apiFetch("/api/wallet/ton/broadcast", {
         method: "POST",
         body: JSON.stringify({
-          boc: typeof signed === "string" ? signed : (signed as any)?.boc,
+          boc: typeof signed === "string" ? signed : (signed as { boc?: string })?.boc,
           symbol,
           side,
           size: amount,
@@ -323,8 +374,8 @@ export default function Wallet({
       }
       setTonTradeMsg(`TON ${side.toUpperCase()} approved & broadcast — ${broadcastJson.tx_hash}`);
       setTonTradeAmount("");
-    } catch (e: any) {
-      setTonTradeErr(e?.message ? String(e.message) : "TON trade cancelled or failed");
+    } catch (e) {
+      setTonTradeErr(e instanceof Error ? e.message : "TON trade cancelled or failed");
     } finally {
       setTonTradeBusy(false);
     }
@@ -532,47 +583,7 @@ export default function Wallet({
           <div className="flex flex-wrap gap-1.5">
             {SOLANA_FAST_LINKS.map((wid) => {
               const app = WALLET_APPS[wid];
-              const [tonMnemonic, setTonMnemonic] = useState<string>("");
-  const [tonShowMnemonic, setTonShowMnemonic] = useState<boolean>(false);
-  const [tonMnemonicStatus, setTonMnemonicStatus] = useState<{ user_mnemonic_set: boolean; server_mnemonic_set: boolean; active_source: string } | null>(null);
-
-  useEffect(() => {
-    apiFetch("/api/wallet/ton/mnemonic")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (j) setTonMnemonicStatus({ user_mnemonic_set: !!j.user_mnemonic_set, server_mnemonic_set: !!j.server_mnemonic_set, active_source: j.active_source }); })
-      .catch(() => {});
-  }, []);
-
-  const handleSaveTonMnemonic = async () => {
-    try {
-      const res = await apiFetch("/api/wallet/ton/mnemonic", {
-        method: "POST",
-        body: JSON.stringify({ mnemonic: tonMnemonic }),
-      });
-      const j = await res.json();
-      if (res.ok) {
-        setTonMnemonic("");
-        setTonMnemonicStatus((p) => ({ ...(p || { server_mnemonic_set: false, active_source: "" }), user_mnemonic_set: true, active_source: "user" }));
-        setTonTradeMsg("TON mnemonic saved (AES-256 encrypted).");
-      } else {
-        setTonTradeErr(j.detail || "Failed to save mnemonic");
-      }
-    } catch (e: any) {
-      setTonTradeErr(String(e?.message || e));
-    }
-  };
-
-  const handleDeleteTonMnemonic = async () => {
-    try {
-      await apiFetch("/api/wallet/ton/mnemonic", { method: "DELETE" });
-      setTonMnemonicStatus((p) => (p ? { ...p, user_mnemonic_set: false, active_source: p.server_mnemonic_set ? "server" : "none" } : p));
-      setTonTradeMsg("TON mnemonic removed.");
-    } catch (e: any) {
-      setTonTradeErr(String(e?.message || e));
-    }
-  };
-
-  return (
+              return (
                 <button
                   key={wid}
                   type="button"

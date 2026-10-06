@@ -141,9 +141,12 @@ class ExecutionRouter:
         from sqlalchemy import select
         async with AsyncSessionLocal() as db:
             pb_result = await db.execute(
-                select(PaperBalance).where(PaperBalance.profile_id == profile.id)
+                select(PaperBalance).where(
+                    PaperBalance.profile_id == profile.id,
+                    PaperBalance.asset == "TON",
+                )
             )
-            pb = pb_result.scalar_one_or_none()
+            pb = pb_result.scalars().first()
 
             if side == "buy":
                 have = float(pb.balance) if pb and pb.balance is not None else 0.0
@@ -396,12 +399,13 @@ class ExecutionRouter:
         symbol: str,
         side: str,
         size: float,
-        mode: str
+        mode: str,
+        price: float = 0.0,
     ) -> ExecutionResult:
         """Close an existing position"""
         opposite_side = "sell" if side == "buy" else "buy"
         return await self.execute(
-            profile, symbol, opposite_side, size, 0, None, None, mode
+            profile, symbol, opposite_side, size, price, None, None, mode
         )
     
     async def get_balance(self, profile, exchange: str) -> Dict[str, float]:
@@ -412,11 +416,12 @@ class ExecutionRouter:
             from app.models import PaperBalance
             from sqlalchemy import select
             async with AsyncSessionLocal() as db:
-                pb_result = await db.execute(
-                    select(PaperBalance).where(PaperBalance.profile_id == profile.id)
-                )
-                pb = pb_result.scalar_one_or_none()
-            return {"USDT": float(pb.balance) if pb and pb.balance is not None else 0.0}
+                from sqlalchemy import func
+                total = (await db.execute(
+                    select(func.coalesce(func.sum(PaperBalance.balance), 0))
+                    .where(PaperBalance.profile_id == profile.id)
+                )).scalar()
+            return {"USDT": float(total or 0)}
 
         client = await self._get_cex_client(str(profile.id), exchange)
         balance = await client.fetch_balance()
